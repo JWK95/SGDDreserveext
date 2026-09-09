@@ -27,6 +27,19 @@ exclude_files = {
 	-- (it is gitignored), but locally it makes the documented "luacheck ."
 	-- report the same file twice and fail on vendored library warnings.
 	"dist/",
+
+	-- CI installs Lua and LuaRocks INTO THE WORKSPACE -- leafo/gh-actions-lua
+	-- writes .lua/ and leafo/gh-actions-luarocks writes .luarocks/, both
+	-- alongside our source. Without these two lines "luacheck ." recurses into
+	-- them and lints LuaRocks' own code and luafilesystem's test suite, which
+	-- produces hundreds of warnings and a red build that names no file of ours.
+	--
+	-- It cannot reproduce locally: nobody has a .luarocks/ in their checkout.
+	-- The only symptom is CI failing while the same commit is clean on a
+	-- developer's machine, which is exactly the kind of thing that gets a lint
+	-- job disabled rather than fixed.
+	".lua/",
+	".luarocks/",
 }
 
 -- The specs run under busted, which supplies describe/it/assert.
