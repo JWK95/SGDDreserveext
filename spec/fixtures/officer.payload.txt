@@ -1,0 +1,17 @@
+V|1|0
+K|officer
+G|Same Gear Different Day
+T|2026-09-07T14:03:00Z
+C|Faithmusher-Hellfire|Faithmusher|hellfire|PALADIN
+C|Beefy-ArgentDawn|Beefy|argent-dawn|WARRIOR
+C|Zoe-TwistingNether|Zoe|twisting-nether|EVOKER
+C|Grimtusk-Kiljaeden|Grimtusk|kiljaeden|DEATHKNIGHT
+S|Faithmusher-Hellfire|19019|Mythic|2026-09-04T14:03:00Z|Thunderfury
+S|Faithmusher-Hellfire|17182|Mythic|2026-09-04T14:03:00Z|Sulfuras
+S|Faithmusher-Hellfire|22691|Heroic|2026-09-05T14:03:00Z|Corrupted Ashbringer
+S|Beefy-ArgentDawn|19019|Heroic|2026-09-03T14:03:00Z|Thunderfury
+S|Beefy-ArgentDawn|12590|Normal|2026-09-03T14:03:00Z|Felstriker
+S|Zoe-TwistingNether|19019|Mythic|2026-09-06T14:03:00Z|Thunderfury
+S|Grimtusk-Kiljaeden|18832|Mythic|2026-09-02T14:03:00Z|Brutality Blade
+A|Beefy-ArgentDawn|17204|Heroic|2026-09-01T14:03:00Z|Eye of Sulfuras
+A|Zoe-TwistingNether|12590||2026-08-29T14:03:00Z|Felstriker

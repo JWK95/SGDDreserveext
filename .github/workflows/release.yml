@@ -1,0 +1,33 @@
+name: Release
+
+# Tag-driven. `git tag v1.0.0 && git push --tags` builds the package, pulls the
+# embedded libraries from their upstreams, substitutes @project-version@ into
+# the TOC, attaches the zip to a GitHub release, and uploads to CurseForge.
+#
+# The guild website reads the GitHub release asset, so this workflow is what
+# feeds BOTH distribution channels. It works today without a CurseForge token:
+# the packager warns and skips the CurseForge upload when CF_API_KEY is absent,
+# and still produces the GitHub release the site needs. See NOTES-CURSEFORGE.md
+# for what to do when the token arrives.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Package and release
+        uses: BigWigsMods/packager@v2
+        env:
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}

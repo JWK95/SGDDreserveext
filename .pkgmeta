@@ -1,0 +1,18 @@
+package-as: SGDDReserves
+
+externals:
+  Libs/LibStub: https://repos.curseforge.com/wow/libstub/trunk
+  Libs/LibDeflate:
+    url: https://github.com/SafeteeWoW/LibDeflate
+    tag: latest
+
+ignore:
+  - .github
+  - .luacheckrc
+  - .gitignore
+  - spec
+  - docs
+  - CLAUDE.md
+  - NOTES-CURSEFORGE.md
+  - SITE-EXPORT-PROMPT.txt
+  - README.md

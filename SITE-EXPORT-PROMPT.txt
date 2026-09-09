@@ -1,0 +1,360 @@
+================================================================================
+PROMPT FOR THE AGENT WORKING IN  D:\Documents\wowappguildreserveloot
+Task: cut the export down to ONE, and move it to format version 2
+================================================================================
+
+Paste everything below the dashed line into the agent working in the
+wowappguildreserveloot repo. It is written to be read cold, with no knowledge of
+the addon.
+
+This supersedes the earlier three-export brief entirely. If that work has already
+shipped, the first section below says exactly what to remove.
+
+--------------------------------------------------------------------------------
+
+# Reserve export for the SGDDReserves addon, version 2
+
+A companion World of Warcraft addon called **SGDDReserves** is being built in a
+separate repo (github.com/JWK95/SGDDreserveext). It is a read-only extension for
+RCLootCouncil that shows, in the loot master's voting window, who reserved the
+item currently up for loot.
+
+The addon has no network access and never talks to this site. The ONLY channel
+between the two is a string a human copies from this site and pastes into the
+addon. Your job is to produce that string.
+
+This document is the contract. The addon is being written against it, in another
+repo, at the same time as you work. If you find a reason to deviate from the
+format below, do not deviate silently - say so in your response so the addon side
+can be changed to match. A field renamed here and not there is a silent import
+failure at raid time.
+
+## What changed, and what to delete
+
+The guild changed its mind about how loot night runs. **Only the master looter
+imports anything now.** Raiders install nothing and paste nothing; they ask what
+they reserved by whispering the master looter `!wdir` in game, and the addon
+answers from the master looter's copy.
+
+That collapses three exports into one. Remove, do not deprecate:
+
+1. **The personal export** and its button ("Copy my reserves for the addon") on
+   the member's own reserve page. Nobody has anywhere to paste it. Any test
+   asserting a personal export never leaks another account's character goes with
+   it.
+2. **The Gargul CSV export.** REPLACE IT with the SGDDR export specified in
+   "Wire format" below. This is a replacement, not a deletion of a feature: the
+   need it served - getting reserves out of this site and in front of whoever is
+   running loot - is now served by the one SGDDR string, and served better.
+
+   Delete all of: the button ("Copy for Gargul"), the
+   `ItemId,Name,Class,Note,Plus` CSV writer, the `text/csv` response or
+   clipboard path that fed it, its tests, and the same-name collision warning
+   that existed only because Gargul keys reserves by bare character name.
+
+   The guild evaluated Gargul and the GM decided against it. Do not keep the CSV
+   "just in case", do not leave it behind a feature flag, and do not add a
+   Gargul-shaped export back later - an export nobody pastes is an export nobody
+   notices has broken. If you believe something still depends on the CSV, say so
+   rather than keeping it quietly.
+
+   Everything the CSV carried is carried by the new format, in a different and
+   better-specified place:
+
+       Gargul CSV column   ->  SGDDR replacement
+       ItemId              ->  the itemId field of an `S` record
+       Name                ->  the ingameKey field of an `S` record, which is
+                               Name-Realm rather than a bare name, which is what
+                               made the collision warning necessary at all
+       Class               ->  the class field of the matching `C` record
+       Note                ->  nothing. It carried the difficulty by convention;
+                               the `S` record now has a real `tier` field with a
+                               closed set of allowed values (see below)
+       Plus                ->  nothing. The addon does not rank or score
+                               reserves, and must not start
+
+   Naming, so nothing is guessed at: the format is called the **SGDDR export**,
+   the envelope literal is `SGDDR`, the current major version is `2`, and the
+   single button is labelled **"Copy reserves for the addon"**. Do not label it
+   with the addon's name, a version number, or the word export twice.
+3. **The `K` record** (which export this was) and **the `A` record** (awarded
+   items) from the payload. The addon no longer displays awarded data at all.
+
+What remains is one button, on the officer export page, producing one string.
+
+## Scope: one export, one button
+
+- Placement: `/officer?tab=export`, one button, labelled "Copy reserves for the
+  addon".
+- One click copies the string to the clipboard. Do not make a select-all
+  textarea and hope. Show the export timestamp beside the button so the officer
+  can see what they just copied.
+- Scope rules unchanged from the old officer export: active raids only, and
+  "nothing ticked" means export everything rather than nothing. An export that
+  silently produces zero rows reads as the feature being broken.
+- Rank gate unchanged: officers and the GM. The addon has **no** rank check of
+  its own any more - it was a guardrail against a raider pasting an officer
+  string by accident, and with only one export there is nothing to confuse it
+  with. This site's gate is now the only one, so do not weaken it.
+- **The two-reserves-per-character limit is now load-bearing for the addon.**
+  Not a new rule, but it stopped being only a site rule. A `!wdir` reply is one
+  whisper capped at 255 BYTES, and it now sends real item links, which cost
+  roughly 80 bytes each against about 25 for a plain name. Two links fit with
+  room to spare; four do not, and the reply would start truncating and telling
+  the raider it had.
+  So: do not raise the cap without saying so. If the guild ever wants three or
+  more, that is fine - but it has to be a decision made with the addon side, not
+  a config change that quietly starts truncating people's answers on raid night.
+
+## Wire format
+
+Three layers, outermost first. **Only the version number and the record set have
+changed from version 1** - the envelope, compression and payload rules are
+unchanged, so if you already implemented them, leave them alone.
+
+### Layer 1 - the envelope
+
+    SGDDR:2:<base64>
+
+- Literal ASCII magic `SGDDR`, a colon, the major format version, a colon, then
+  standard base64.
+- Major version is now `2`. It exists so the addon can reject a string it cannot
+  parse before spending anything decompressing it.
+- Standard base64 (`Buffer.from(bytes).toString("base64")`), RFC 4648 alphabet,
+  `=` padding included. NOT a custom alphabet, NOT base64url, NOT LibDeflate's
+  `EncodeForPrint`. The addon decodes plain base64 itself. This was chosen
+  specifically so this side needs no hand-written encoder: any deviation moves
+  risk onto you for no gain.
+- No line wrapping. One long line.
+
+### Layer 2 - compression
+
+- Raw DEFLATE, no zlib header, no gzip header. In Node:
+  `zlib.deflateRawSync(Buffer.from(payload, "utf8"))`.
+- Raw deflate is what the addon's `LibDeflate:DecompressDeflate` expects.
+  `deflateSync` (zlib-wrapped) or `gzipSync` will fail to decode. This is the
+  single easiest thing to get wrong here.
+- No checksum field is needed. A truncated paste fails the deflate decode loudly,
+  which is the behaviour we want. Do not add one.
+
+### Layer 3 - the payload
+
+UTF-8 text. Lines separated by `\n` (LF only, never CRLF). Fields separated by
+`|` (U+007C). The first field of every line is a single-character record type.
+
+No field may contain `|` or a newline. WoW character, realm and item names cannot
+contain either, so this is a validation assertion rather than an escaping
+problem: if a value somehow contains one, refuse to export and say why rather
+than emitting a line that will mis-parse into neighbouring fields.
+
+Record order: header records first (`V`, `G`, `T`), then all `C`, then all `S`.
+The addon does not depend on the order of records within a type. Do not sort for
+the addon's benefit; sort for deflate's - grouping by character produces a
+noticeably smaller blob.
+
+#### Header records (exactly one of each, in this order)
+
+    V|2|0
+
+Format version: major, minor. Major `2`, minor starts at `0`.
+
+Versioning rule (the addon implements the matching half):
+
+- Adding a new optional trailing field to an existing record, or adding a new
+  record type, is a MINOR bump. Old addons ignore what they do not recognise.
+- Changing the meaning, order or presence of an existing field, or removing a
+  record type, is a MAJOR bump. Old addons refuse the import and name the version
+  they need.
+- A mismatch is never migrated. It is read as a miss and refused - the same rule
+  this repo already applies to stored JSON payloads.
+
+**Ordering note for the cutover.** The addon ships BEFORE this change does. So
+between the two deploys, an officer running the new addon pastes a version 1
+string and it is refused. The addon's refusal message names *this site* as the
+one that needs updating when the string's version is below its own, which is the
+correct direction of blame - but it still means the sooner this lands, the
+shorter the window. Ship it before raid night.
+
+    G|Same Gear Different Day
+
+The guild name, spelled exactly as Blizzard has it. Emit it from configuration,
+not a hardcoded literal, so it survives a guild rename.
+
+    T|2026-09-07T18:14:22Z
+
+When this export was generated by this site. UTC, ISO-8601, second precision, `Z`
+suffix, no milliseconds.
+
+This is the freshness clock and it must be your clock, not the addon's. It now
+does more work than it did in version 1: the addon warns the master looter, on
+entering a raid and again when a loot session opens, if this timestamp is older
+than the most recent weekly reset. **An export with no `T` is refused outright**,
+because the warning would have nothing to read.
+
+#### `C` - character dictionary
+
+    C|<ingameKey>|<name>|<realmSlug>|<class>
+
+Example:
+
+    C|Talithmusher-TwistingNether|Talithmusher|twisting-nether|PALADIN
+
+- `ingameKey` - `Name-RealmWithSpacesAndPunctuationRemoved`, which is the form
+  WoW and RCLootCouncil use in game. `twisting-nether` becomes `TwistingNether`.
+  `argent-dawn` becomes `ArgentDawn`. `kirin-tor` becomes `KirinTor`. Hyphens,
+  apostrophes and spaces in the realm are removed; the character name is left
+  exactly as stored.
+- `realmSlug` - this site's own slug (`twisting-nether`), carried as a fallback so
+  the addon has a second way to match if the first fails.
+- `class` - the uppercase English token (`PALADIN`, `DEATHKNIGHT`, `DEMONHUNTER`,
+  `EVOKER`, ...), used for class colouring. Emit an empty field if genuinely
+  unknown; do not guess.
+
+This is the highest-risk field in the whole format. The two repos must agree on
+the in-game key byte for byte or the addon imports 150 reserves, matches zero
+group members, and renders an empty column that looks exactly like "nobody
+reserved anything". The guild raids across many different realms, including
+multi-word realm names and connected realms, so this is not a theoretical case.
+
+Emit both forms. The addon normalises both sides again on its end. This is
+deliberately belt-and-braces because the failure is invisible.
+
+One `C` line per character that appears in any `S` line. No orphans in either
+direction: every `C` is referenced, and every reference has a `C`.
+
+Note that reserves are now **per character** in a way members will notice: a
+raider who whispers `!wdir` from an alt is told no reserves were found for that
+character. There is deliberately no owner or account field in this format, and
+the addon deliberately makes no comment about which character anyone is on. Do
+not add one without asking.
+
+#### `S` - a reserve
+
+    S|<ingameKey>|<itemId>|<tier>|<reservedAt>|<itemName>
+
+Example:
+
+    S|Talithmusher-TwistingNether|213456|Mythic|2026-09-03T19:04:11Z|Aureate Sentry Greatsword
+
+- `ingameKey` - matches a `C` line exactly.
+- `itemId` - integer, and the source of truth. The addon resolves name, icon,
+  quality and a real item link from this in game, which gives hoverable tooltips
+  and correct localisation on every client.
+- `tier` - the raid DIFFICULTY, from a closed set of exactly four values:
+
+      Mythic
+      Heroic
+      Normal
+      LFR
+
+  Send one of those four, spelled that way. The addon matches
+  case-insensitively, so `mythic` is accepted, but do not rely on that - emit
+  the capitalisation above.
+
+  **Send the difficulty, never the item track.** The addon displays these as
+  `Myth`, `Hero`, `Champ` and `LFR`, because that is how the guild talks about
+  loot, and it does that translation itself in one file. Do NOT send `Myth`,
+  `Hero`, `Champ`, `Veteran`, `M`, `H`, `N`, `HC`, or a numeric difficulty id.
+  The difficulty is the true name of the thing a raider picked; the track name
+  is a display label, and this format carries data, not labels.
+
+  Anything outside the four values is rendered **verbatim** in the officer's
+  voting column, deliberately: a cell reading `Warband` is a bug report, where a
+  cell reading `W` would be invisible. So a wrong value here is loud rather than
+  silent, but it is still wrong, and it is your side that has to fix it.
+
+  If `user_reserves.tier` currently stores something other than these four
+  values, map it on the way out and say so in your response - do not widen the
+  set on the addon's behalf without asking, because the addon's colour and
+  sort order are keyed on it.
+
+  The addon shows all four difficulties without filtering and makes no judgement
+  about which one tonight's raid is.
+- `reservedAt` - UTC ISO-8601, same shape as `T`.
+- `itemName` - fallback only, English as stored. Do not treat it as
+  authoritative and do not localise it.
+
+  It is used in exactly one situation: the client has not cached the item yet,
+  so the addon cannot resolve a real name or build a link from `itemId`. Both
+  the officer's column tooltip and the raider's `!wdir` reply now use a real
+  in-game item link built from `itemId`, and fall back to this string only while
+  the cache is cold. That makes `itemId` the field that matters and this one the
+  safety net - but the net is still load-bearing on the first `!wdir` after a
+  master looter relogs, so keep emitting it.
+
+## Worked example (payload, before deflate and base64)
+
+    V|2|0
+    G|Same Gear Different Day
+    T|2026-09-07T18:14:22Z
+    C|Talithmusher-TwistingNether|Talithmusher|twisting-nether|PALADIN
+    C|Beefy-ArgentDawn|Beefy|argent-dawn|WARRIOR
+    S|Talithmusher-TwistingNether|213456|Mythic|2026-09-03T19:04:11Z|Aureate Sentry Greatsword
+    S|Talithmusher-TwistingNether|213460|Mythic|2026-09-03T19:05:02Z|Band of the Wakening
+    S|Beefy-ArgentDawn|213456|Heroic|2026-09-04T11:20:44Z|Aureate Sentry Greatsword
+
+## Second task: serve the addon from this site
+
+Unchanged from the previous brief. If it is already built, leave it alone.
+
+The addon ships on CurseForge (project 1685978) and from this site, as `/addons`
+already does for ClassCodex.
+
+The addon's GitHub repo is public, and a tagged release publishes a packaged zip
+as a GitHub release asset. Fetch the latest release from the GitHub releases API
+for `JWK95/SGDDreserveext`, cache it on disk keyed by tag, and serve it behind
+the existing guild wall.
+
+This is deliberately the same shape as `class-codex.ts`, and the rules that
+module learned the hard way apply unchanged: the page fetches only the small
+metadata behind a short cache and never the archive; the download route fetches
+once per tag and writes the cache aside-then-rename so a dead request cannot
+leave a truncated archive that later requests serve; and a failed fetch is an
+outage, not an answer, so it must not be cached as "no release exists".
+
+No authentication token is required while the repo is public. If it is ever made
+private this breaks - fail loudly rather than serving a stale zip forever.
+
+## Definition of done
+
+This repo's existing bar, unchanged: `npx tsc --noEmit`, `npx eslint src/ tests/`
+and `npm test`, all three clean.
+
+Tests worth having, because these are the failures that are invisible rather than
+loud:
+
+- Round-trip: build a payload, deflate, base64, then decode it back with
+  `zlib.inflateRawSync` and assert it matches byte for byte. This is the one test
+  that catches `deflateSync` being used in place of `deflateRawSync`.
+- The envelope says `SGDDR:2:`. Mutation-test it: leave it at `1` and confirm a
+  test fails, because a version 1 envelope is exactly what the addon refuses.
+- No `K` and no `A` record appears in the output. Serialise and grep, the way
+  `MainRankRow` is pinned to never carry a BattleTag. An `A` record left in is
+  harmless to the addon but means awarded data is still being shipped to a client
+  that has no business holding it.
+- **The Gargul CSV is gone, and stays gone.** Assert that no route, handler or
+  clipboard action produces the `ItemId,Name,Class,Note,Plus` header, and that
+  the string "Gargul" appears nowhere in `src/`. This is a grep test on purpose:
+  the failure it guards is somebody restoring a "harmless" second export later,
+  which is how the guild ends up with two sources of truth again.
+- **Every `tier` emitted is one of the four allowed values.** Build an export
+  from fixture data covering all four and assert the set. Then mutation-test it:
+  emit `Myth` instead of `Mythic` and confirm a test fails. That single
+  substitution is the most likely way this format breaks in practice, because
+  `Myth` is the word everyone in the guild says out loud - and it is exactly the
+  wrong thing to put in the data.
+- A tier value outside the four is rejected at export time rather than shipped.
+  The addon renders an unknown tier verbatim so it is at least visible, but that
+  is a backstop, not permission.
+- In-game key derivation, against real multi-word and punctuated realms:
+  `twisting-nether` -> `TwistingNether`, `argent-dawn` -> `ArgentDawn`,
+  `kirin-tor` -> `KirinTor`. Mutation-test it: break the derivation and confirm a
+  test fails.
+- A `|` or a newline in any field refuses the export rather than emitting it.
+- An export with no `T` record is impossible to produce. The addon refuses it,
+  and the officer finds out at raid time.
+- Nothing ticked on active raids exports everything, not nothing.
+
+Report back: the final envelope prefix, the exact record set you emit, and
+anything you had to deviate on. The addon's `docs/export-format.md` is the same
+contract from the other side and must be changed in step if anything moves.

@@ -1,0 +1,46 @@
+## Interface: 120100
+## Title: SGDD Reserves
+## Notes: Shows guild loot reserves in the RCLootCouncil voting frame.
+## Author: JWK95
+## Version: @project-version@
+## Dependencies: RCLootCouncil
+## SavedVariables: SGDDReservesDB
+
+# Group nests this under RCLootCouncil in the addon list, the way
+# RCLootCouncil - Merit and RCLootCouncil - Extra Utilities appear. The client
+# can also deduce a group on its own, but only when one addon's folder name is a
+# complete PREFIX of the other's -- "SGDDReserves" is not, so it has to be said
+# explicitly. Saying it is why this addon does not need to be renamed
+# "RCLootCouncil_SGDDReserves", which would orphan the saved variables (they are
+# keyed on the folder name) and leave anyone who installs the zip by hand with
+# two copies loaded at once.
+#
+# Category puts it under the same "Loot" heading RCLootCouncil files itself
+# under, instead of the bottom of an alphabetical list of forty addons.
+## Group: RCLootCouncil
+## Category-enUS: Loot
+## X-Curse-Project-ID: 1685978
+## X-License: MIT
+## IconTexture: Interface\Icons\INV_Misc_Note_01
+
+Libs\LibStub\LibStub.lua
+Libs\LibDeflate\LibDeflate.lua
+
+# Pure, no WoW API: loaded first and covered by spec/.
+Names.lua
+Tiers.lua
+Schema.lua
+Freshness.lua
+Whisper.lua
+
+Core.lua
+Import.lua
+
+# The only two files that know RCLootCouncil exists.
+RC.lua
+VotingColumn.lua
+
+Responder.lua
+Nag.lua
+OfficerFrame.lua
+Options.lua

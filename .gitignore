@@ -39,3 +39,10 @@ luac.out
 *.x86_64
 *.hex
 
+
+# Libraries are pulled at package time by .pkgmeta, never committed.
+Libs/
+
+# Local packaging for testing. CI does the real build from a tag.
+dist/
+build.ps1
