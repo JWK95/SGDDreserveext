@@ -76,6 +76,9 @@ local function InitDB()
 	if SGDDReservesDB.options.respondToWhispers == nil then
 		SGDDReservesDB.options.respondToWhispers = true
 	end
+	if SGDDReservesDB.options.showTooltipReserves == nil then
+		SGDDReservesDB.options.showTooltipReserves = true
+	end
 end
 
 function ns.Options()
@@ -287,6 +290,9 @@ function ns.UpdateScope()
 	if ns.VotingColumn then ns.VotingColumn:Refresh() end
 	if ns.Responder then ns.Responder:SetActive() end
 	if ns.Nag then ns.Nag:SetActive() end
+	-- One way only: the tooltip callback cannot be unregistered once added, so
+	-- this switch turns on and never off. See Tooltip.lua.
+	if ns.Tooltip then ns.Tooltip:SetActive() end
 end
 
 --------------------------------------------------------------------------------

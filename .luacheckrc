@@ -90,6 +90,13 @@ read_globals = {
 	"C_DateAndTime",
 	"C_Timer",
 
+	-- Item tooltips. The addon adds a "Reserved by:" line and nothing else; see
+	-- Tooltip.lua. RAID_CLASS_COLORS is read for the class colour on each name.
+	"TooltipDataProcessor",
+	"Enum",
+	"ItemRefTooltip",
+	"RAID_CLASS_COLORS",
+
 	-- Misc
 	"LibStub",
 	"C_AddOns",

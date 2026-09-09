@@ -73,6 +73,12 @@ Hover a cell for the detail; click the header to sort reservers to the top,
 hardest difficulty first. The header reads `Reserved!` instead of `Reserved`
 when the loaded list is out of date.
 
+Reserved items also get a **Reserved by:** line on their tooltip — in your bags,
+the loot window, and on item links in chat — naming who has them and at which
+difficulty, class-coloured. It only appears on your own screen and only for
+items on the list you imported. Turn it off in the settings panel if you would
+rather not have it.
+
 The column only appears once you have imported something. **An empty column and
 a broken import look identical**, so absent is the honest signal — and the
 import tells you how many of the people in your group it actually matched. If

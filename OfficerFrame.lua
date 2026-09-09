@@ -15,7 +15,12 @@ local _, ns = ...
 local OfficerFrame = {}
 ns.OfficerFrame = OfficerFrame
 
-local WIDTH, HEIGHT = 450, 420
+-- The window grew rather than the list shrinking. The paste box is where an
+-- officer's attention lands first, but the list below it is where they confirm
+-- what they actually imported -- taking space from that to enlarge a box whose
+-- contents are an unreadable blob would be the wrong trade.
+local WIDTH, HEIGHT = 450, 460
+local PASTE_H = 100
 local LINE_H = 14
 
 local frame, content, status, report, editBox, lines, listScroll, listChild
@@ -205,6 +210,31 @@ local function Build()
 	frame, content = BuildFrame()
 	lines = { n = 0 }
 
+	-- RCLootCouncil's RCFrame ships no close button, and that is the frame this
+	-- window almost always uses. Escape does close it -- it is registered in
+	-- UISpecialFrames -- but nothing on screen says so, and a window with no
+	-- visible way out reads as stuck.
+	--
+	-- The fallback BasicFrameTemplateWithInset brings its own, so only add one
+	-- when there is not one already; two X buttons is its own kind of wrong.
+	if not (frame.CloseButton or frame.closeButton) then
+		-- On the TITLE bar, not content: RCFrame minimizes by double-clicking
+		-- the title and only content is minimized, so a close button parented
+		-- to content would disappear exactly when somebody is trying to find it.
+		local anchor = frame.title or frame.Title or frame
+		local close = CreateFrame("Button", nil, anchor, "UIPanelCloseButtonNoScripts")
+		close:SetPoint("TOPRIGHT", anchor, "TOPRIGHT", -2, -2)
+		-- Our own OnClick rather than the stock script: UIPanelCloseButton_OnClick
+		-- routes through HideUIPanel, which in 12.x opens with a protected-function
+		-- check. A plain custom frame has no reason to depend on that gate.
+		--
+		-- Hides only. It deliberately does not clear the paste box -- "the X threw
+		-- away what I just pasted" is a bad surprise, and Clear box already exists
+		-- for people who mean it.
+		close:SetScript("OnClick", function() frame:Hide() end)
+		frame.closeButton = close
+	end
+
 	status = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	status:SetPoint("TOPLEFT", content, "TOPLEFT", 12, -14)
 	status:SetJustifyH("LEFT")
@@ -218,37 +248,41 @@ local function Build()
 	label:SetPoint("TOPLEFT", report, "BOTTOMLEFT", 0, -12)
 	label:SetText("Paste the export from the guild website:")
 
-	local boxBg = CreateFrame("Frame", nil, content, "InsetFrameTemplate")
-	boxBg:SetPoint("TOPLEFT", label, "BOTTOMLEFT", -4, -4)
-	boxBg:SetSize(WIDTH - 24, 64)
+	-- Blizzard's own multiline input. Taken wholesale rather than hand-rolled
+	-- because it already solves the thing that was wrong here: its OnMouseDown
+	-- focuses the edit box, so a click anywhere in the box works instead of
+	-- only a click that lands on the text itself.
+	--
+	-- It carries a per-frame OnUpdate for caret tracking, which is the addon's
+	-- one exception to "no OnUpdate" -- it ticks only while this window is
+	-- open, and an officer opens it once a week. Recorded in CLAUDE.md.
+	local pasteBox = CreateFrame("ScrollFrame", "SGDDReservesPasteScroll", content, "InputScrollFrameTemplate")
+	pasteBox:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 4, -6)
+	pasteBox:SetSize(WIDTH - 40, PASTE_H)
 
-	local scroll = CreateFrame("ScrollFrame", "SGDDReservesPasteScroll", boxBg, "UIPanelScrollFrameTemplate")
-	scroll:SetPoint("TOPLEFT", 6, -6)
-	scroll:SetPoint("BOTTOMRIGHT", -26, 6)
-
-	editBox = CreateFrame("EditBox", nil, scroll)
-	editBox:SetMultiLine(true)
-	editBox:SetAutoFocus(false)
+	editBox = pasteBox.EditBox
 	editBox:SetFontObject("ChatFontNormal")
-	editBox:SetTextInsets(2, 2, 2, 2)
-	-- A multiline EditBox used as a scroll child needs BOTH dimensions. With no
-	-- height it is zero pixels tall, which does not look broken -- it looks like
-	-- an empty box that will not take a click. It grows past this as text
-	-- arrives; this is only the clickable target.
-	editBox:SetSize(WIDTH - 60, 52)
+	editBox:SetWidth(pasteBox:GetWidth() - 18)
 	editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 	-- Replacing the contents is the normal case, not appending to them.
 	editBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
-	scroll:SetScrollChild(editBox)
 
-	-- The whole inset is the paste target. Hunting for a text cursor inside a
-	-- box that is mostly empty is a bad first thirty seconds.
-	boxBg:EnableMouse(true)
-	boxBg:SetScript("OnMouseDown", function() editBox:SetFocus() end)
+	-- The template hides its character counter only when a limit is set. There
+	-- is no useful limit on an export string, so the counter is just noise.
+	if pasteBox.CharCount then pasteBox.CharCount:Hide() end
+
+	-- WoW gives an addon no way to read the clipboard -- the EditBox API's only
+	-- clipboard-adjacent method is SetSecurityDisablePaste, which switches the
+	-- client's own paste OFF. So there can be no "paste" button, and the next
+	-- best thing is removing the click before it: the box is focused when the
+	-- window opens, so the sequence is /rc reserves, Ctrl+V, Import.
+	local hint = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	hint:SetPoint("TOPLEFT", pasteBox, "BOTTOMLEFT", 0, -2)
+	hint:SetText("The box is already selected -- just press Ctrl+V, then Import.")
 
 	local importButton = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
 	importButton:SetSize(110, 22)
-	importButton:SetPoint("TOPLEFT", boxBg, "BOTTOMLEFT", 4, -8)
+	importButton:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", 0, -8)
 	importButton:SetText("Import")
 	importButton:SetScript("OnClick", DoImport)
 
@@ -294,16 +328,29 @@ end
 -- Public
 --------------------------------------------------------------------------------
 
+-- The window exists to receive a paste, so it hands the paste box the keyboard
+-- the moment it opens: /rc reserves, Ctrl+V, Import, with no click anywhere.
+--
+-- Done on show rather than with SetAutoFocus(true), which would also grab focus
+-- on any later reshow the addon does for its own reasons, and would fight the
+-- template. The cost is that typing goes to the box until Escape -- correct for
+-- a window whose only purpose is to be typed into.
+local function FocusPasteBox()
+	if editBox then editBox:SetFocus() end
+end
+
 function OfficerFrame:Toggle()
 	if not frame then Build() end
 	if frame:IsShown() then
 		frame:Hide()
 	else
 		frame:Show()
+		FocusPasteBox()
 	end
 end
 
 function OfficerFrame:Show()
 	if not frame then Build() end
 	frame:Show()
+	FocusPasteBox()
 end

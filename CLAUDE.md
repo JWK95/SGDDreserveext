@@ -65,6 +65,15 @@ Standing proofs, all mutation-tested:
 - `spec/tiers_spec.lua` — dropping the Normal→Champ mapping, abbreviating an
   unrecognised tier to its first letter, sorting an unknown tier first instead
   of last, handing out the shared colour table.
+- `spec/reservers_spec.lua` — never disambiguating a colliding name, always
+  disambiguating one, counting collisions after the cap instead of before,
+  ignoring tier rank when ordering, reversing it, dropping the name tiebreak,
+  an off-by-one in the truncation count, truncating silently, ignoring the
+  colouriser. **The ordering test was itself caught by mutation**: its first
+  version used names that were already alphabetical, so deleting the tier
+  comparison changed nothing and the test passed either way. The fix was to
+  arrange the names in the opposite order to the difficulties, which is the
+  only thing that makes that comparison load-bearing.
 
 ## Invariants
 
@@ -137,9 +146,26 @@ out of the way.
 
 ### Weight
 
-- **No `OnUpdate`, no polling, no work in combat.** Parsing happens once, at
-  paste. Session starts arrive as one comm subscription, fired only when a
-  master looter actually starts one; there is no AceEvent for it on any client.
+- **No `OnUpdate`, no polling, no work in combat** — with **one stated
+  exception**. Parsing happens once, at paste. Session starts arrive as one comm
+  subscription, fired only when a master looter actually starts one; there is no
+  AceEvent for it on any client.
+  The exception is `InputScrollFrameTemplate`, Blizzard's multiline input, used
+  for the paste box in `OfficerFrame.lua`. It carries a per-frame `OnUpdate` for
+  caret tracking. It was taken wholesale rather than hand-rolled because it
+  already solves click-anywhere focus, and its `OnUpdate` ticks **only while the
+  import window is open** — a window an officer opens once a week. Rewriting it
+  to avoid the tick would trade a real usability fix for a number nobody can
+  measure.
+- **The item tooltip callback cannot be unregistered, and is therefore
+  permanent for the session.** `TooltipDataProcessor.AddTooltipPostCall` has no
+  removal. `Tooltip.lua` registers through `ns.UpdateScope()` so it is only ever
+  added on a client that has imported — raiders add nothing — but once an
+  officer imports, it is held until they log out. This is a real dent in the
+  rule below and it is why the **option is checked inside the callback** rather
+  than by tearing the callback down: turning the setting off has to stop the
+  line appearing, and unregistering is not available to do it. The callback's
+  first act is the cheapest possible rejection.
 - **At rest the addon holds two registered events**, `ADDON_LOADED` and
   `PLAYER_ENTERING_WORLD`. Everything else — the whisper handler, the session
   subscription — hangs off `ns.UpdateScope()` and is
@@ -204,10 +230,12 @@ out of the way.
 
 **Pure, and covered by `spec/`:** `Names.lua` key folding · `Tiers.lua` the
 difficulty vocabulary — the website stores difficulties (`Mythic`), the guild
-speaks tracks (`Myth`), and this is the only place that translates · `Schema.lua`
-the shape of the dataset, separate from Core so tests can build one without
-`CreateFrame` · `Freshness.lua` is the list still good for tonight ·
-`Whisper.lua` what `!wdir` means and what comes back.
+speaks tracks (`Myth`), and this is the only place that translates ·
+`Reservers.lua` who reserved a given item, in the order an officer reads it,
+including the cross-realm name collision rule · `Schema.lua` the shape of the
+dataset, separate from Core so tests can build one without `CreateFrame` ·
+`Freshness.lua` is the list still good for tonight · `Whisper.lua` what `!wdir`
+means and what comes back.
 
 **The tier vocabulary is addon-side only.** `docs/export-format.md` is unchanged
 and the website keeps sending `Mythic`/`Heroic`/`Normal`/`LFR`. Translating on
@@ -221,9 +249,19 @@ what the difference is mid-pull.
 **Everything else:** `Core.lua` state, events, scope, display helpers ·
 `Import.lua` base64, deflate, parse · `RC.lua` **every handle into
 RCLootCouncil** · `VotingColumn.lua` the column spec and its cell ·
-`Responder.lua` the whisper event, queue and cooldown · `Nag.lua` the stale
-import warning · `OfficerFrame.lua` the import window · `Options.lua` the
-settings panel.
+`Responder.lua` the whisper event and cooldown · `Tooltip.lua` the
+"Reserved by:" line on item tooltips · `Nag.lua` the stale import warning ·
+`OfficerFrame.lua` the import window · `Options.lua` the settings panel.
+
+**The item tooltip is the one place the addon draws outside RCLootCouncil's
+frames.** `Tooltip.lua` adds a line to `GameTooltip` (bags, loot window,
+merchant, character sheet — they all render into it) and `ItemRefTooltip` (an
+item link clicked in chat). It deliberately does **not** decorate
+`ShoppingTooltip1/2`, the comparison tooltips: those describe the gear the
+viewer is already wearing, so a "Reserved by" line there would be attached to
+the wrong item entirely. It still changes nothing about what RCLootCouncil does
+— it is display, on this client, of data this client imported — but it is a real
+widening of *where* the addon appears, so it is behind a setting.
 
 `RC.lua` and `VotingColumn.lua` are the **only** two files that may name
 RCLootCouncil. That is the rule, and the reason is that they are what breaks

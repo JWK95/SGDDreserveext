@@ -20,6 +20,7 @@ function M.namespace()
 	ns.VERSION_MAJOR = 2
 	chunk("Names.lua")("SGDDReserves", ns)
 	chunk("Tiers.lua")("SGDDReserves", ns)
+	chunk("Reservers.lua")("SGDDReserves", ns)
 	chunk("Schema.lua")("SGDDReserves", ns)
 	chunk("Freshness.lua")("SGDDReserves", ns)
 	chunk("Whisper.lua")("SGDDReserves", ns)

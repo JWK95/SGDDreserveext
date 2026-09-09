@@ -57,7 +57,8 @@ local function Table()
 				width = "full",
 				name = "Answer !wdir whispers",
 				desc = "When you are the master looter, reply to anyone who whispers you !wdir with the reserves they are holding. "
-					.. "Replies are held during an encounter and sent when it ends.",
+					.. "During a boss encounter, Mythic+ run or PvP match the game hides whisper contents from addons, "
+					.. "so requests made mid-pull are not seen at all -- ask between pulls.",
 				get = function() return ns.Options().respondToWhispers end,
 				set = function(_, v) ns.Options().respondToWhispers = v end,
 			},
@@ -67,9 +68,26 @@ local function Table()
 				name = "Only the master looter answers, so the raid always gets exactly one reply. "
 					.. "Raiders do not need this addon installed to ask.",
 			},
-			gap2 = { order = 6, type = "header", name = "What raiders see" },
-			observe = {
+			gap2 = { order = 6, type = "header", name = "Item tooltips" },
+			tooltips = {
 				order = 7,
+				type = "toggle",
+				width = "full",
+				name = "Show reserves in item tooltips",
+				desc = "Add a 'Reserved by:' line to the tooltip of any item somebody has reserved -- in your bags, "
+					.. "the loot window, and on item links in chat.",
+				get = function() return ns.Options().showTooltipReserves end,
+				set = function(_, v) ns.Options().showTooltipReserves = v end,
+			},
+			tooltipNote = {
+				order = 8,
+				type = "description",
+				name = "Turning this off stops the line appearing immediately. The line only ever shows on "
+					.. "your own screen, and only for items on the list you imported.",
+			},
+			gap3 = { order = 9, type = "header", name = "What raiders see" },
+			observe = {
+				order = 10,
 				type = "description",
 				name = "This addon shows nothing on a raider's client. If you want raiders to see the "
 					.. "session and what everybody rolled, turn on RCLootCouncil's own |cffffffffObserve|r "

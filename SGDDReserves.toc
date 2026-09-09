@@ -29,6 +29,7 @@ Libs\LibDeflate\LibDeflate.lua
 # Pure, no WoW API: loaded first and covered by spec/.
 Names.lua
 Tiers.lua
+Reservers.lua
 Schema.lua
 Freshness.lua
 Whisper.lua
@@ -41,6 +42,7 @@ RC.lua
 VotingColumn.lua
 
 Responder.lua
+Tooltip.lua
 Nag.lua
 OfficerFrame.lua
 Options.lua
