@@ -215,9 +215,11 @@ Write-Host "  Pushed $tag."
 Write-Host "  Watch:    https://github.com/$repoSlug/actions"
 Write-Host "  Releases: https://github.com/$repoSlug/releases"
 Write-Host ""
-Write-Host "  Expect a CurseForge warning in the log - CF_API_KEY is not set and"
-Write-Host "  the packager skips that upload. The GitHub release still happens,"
-Write-Host "  and that is the one the guild site and WowUp read."
+Write-Host "  CF_API_KEY is configured, so the packager should upload to"
+Write-Host "  CurseForge project 1685978 as well as cutting the GitHub release."
+Write-Host "  CHECK THE LOG: a bad or missing token is a WARNING, not a failure."
+Write-Host "  The run goes green either way, so the log line is the only proof."
+Write-Host "  See docs/releasing.md."
 
 if (-not $Wait) { exit 0 }
 

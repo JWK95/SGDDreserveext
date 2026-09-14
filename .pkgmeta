@@ -13,6 +13,5 @@ ignore:
   - spec
   - docs
   - CLAUDE.md
-  - NOTES-CURSEFORGE.md
   - SITE-EXPORT-PROMPT.txt
   - README.md

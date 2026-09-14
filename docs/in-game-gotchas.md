@@ -125,6 +125,59 @@ valid, but an unguarded throw would have taken out `/rc reserves` registration
 entirely — a large consequence resting on an assumption about somebody else's
 API. Now wrapped.
 
+### 6. The item tooltip threw all night — `type()` is not a secret screen
+
+**Severity: high. Seen in a raid: 537 errors in one night.**
+
+```
+attempt to perform string conversion on a secret string value
+  (execution tainted by 'EllesmereUI')
+debugstack() returned secrets.
+```
+
+Two things made this hard to place, and both are worth learning once.
+
+**The blame is not ours and never will be.** `Tooltip.OnItem` runs inside
+whatever execution asked for the tooltip — a unit frame addon, a bag addon,
+anything that calls `GameTooltip:SetItemByID`. The error names *that* addon as
+the taint source. So an error caused by our code reads as somebody else's, and
+`debugstack` is itself secret, so there is no stack to appeal to. The only way
+in is to reason about which of our values could be secret.
+
+**`type()` does not screen a secret.** `type(secret)` returns the *real* type, so
+a secret string answers `"string"` and walks straight through
+`if type(key) ~= "string" then return nil end` into the `gsub` on the next line.
+`Names.Fold`, `Names.Split`, `Reservers.RealmOf` and `RC:CurrentItemId` all carry
+that guard and not one of them was protected by it. `issecretvalue` is the only
+screen that exists.
+
+The third piece: **concatenation and `string.format` are permitted, and they
+propagate.** Folding a secret into a message produces a secret message silently.
+No error arrives until that message reaches something needing real bytes —
+`AddLine`, `SetText`, `SendChatMessage` — so the throw lands a long way from the
+value that caused it, in code that looks blameless.
+
+*Fix:* `ns.IsSecret` in `Core.lua`, variadic, the one place that knows the API.
+Called at each point a value crosses in from the game: `data` and `data.id` in
+`Tooltip.OnItem`, the candidate name and item id in `VotingColumn.ReserveFor`,
+and the whisper sender in `ns.FoldGameName`.
+
+*What was proved, and what was not.* A real secret cannot be faked outside the
+game — the whole difficulty is that `type()` lies, and no stock Lua value does
+that. What a harness **can** reproduce is a secret used as a table key. Deleting
+the `data.id` guard throws at `Reservers.lua:58`, `set.reserves[itemId]`, with
+**the exact message the raid reported**; deleting the `data` guard throws on the
+indexed access one line later. Both mutations were confirmed to compile first.
+
+The `line` guard at the `AddLine` boundary passes both ways and is documented in
+the file as unproven — it exists because that boundary is where a *future*
+secret would surface. The `VotingColumn` and `FoldGameName` guards are reasoned,
+not proved, for the reason above: a fake secret is caught by `Names.Fold`'s type
+check where a real one would not be.
+
+Why no test saw it: the same reason as #1 and #3. There is no such thing as a
+secret value outside the game.
+
 ---
 
 ## Checked, and already correct
@@ -198,7 +251,12 @@ Not problems today. Each becomes one on a specific patch.
   non-party units; 12.1.0 added `UnitClass`, `UnitSex`, `UnitRace` and
   `UnitGroupRolesAssigned`. Anything this addon reads about *other players* is
   the thing to re-check on each patch — that is `Import.MatchReport` and the
-  whisper sender.
+  whisper sender. Since #6, the rule for anything new is: screen it with
+  `ns.IsSecret` at the point it crosses in from the game, never with `type()`.
+  Two reads are still deliberately unscreened and would throw if they ever
+  turned secret — `RC:CurrentItemId`'s `link:match` and the `masterLooter`
+  comparison below, both RCLootCouncil's own plain strings arriving over its
+  comms rather than from a unit.
 - **`C_ChatInfo.InChatMessagingLockdown`** briefly returned a second
   `lockdownReason` value, removed again in 12.0.5. `Responder.lua` reads only
   the first return, which is correct in every version that has the function.

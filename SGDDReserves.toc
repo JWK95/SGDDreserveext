@@ -27,12 +27,15 @@ Libs\LibStub\LibStub.lua
 Libs\LibDeflate\LibDeflate.lua
 
 # Pure, no WoW API: loaded first and covered by spec/.
+Guard.lua
 Names.lua
 Tiers.lua
 Reservers.lua
 Schema.lua
 Freshness.lua
 Whisper.lua
+Protocol.lua
+Consolidation.lua
 
 Core.lua
 Import.lua
@@ -44,5 +47,14 @@ VotingColumn.lua
 Responder.lua
 Tooltip.lua
 Nag.lua
+
+# The raider-facing half: the one prefix this addon sends on, the live
+# per-session response store, and the two windows they draw.
+Sync.lua
+Responses.lua
+Window.lua
+ReserveWindow.lua
+ResponseWindow.lua
+
 OfficerFrame.lua
 Options.lua

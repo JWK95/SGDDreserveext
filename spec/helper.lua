@@ -18,12 +18,15 @@ end
 function M.namespace()
 	local ns = {}
 	ns.VERSION_MAJOR = 2
+	chunk("Guard.lua")("SGDDReserves", ns)
 	chunk("Names.lua")("SGDDReserves", ns)
 	chunk("Tiers.lua")("SGDDReserves", ns)
 	chunk("Reservers.lua")("SGDDReserves", ns)
 	chunk("Schema.lua")("SGDDReserves", ns)
 	chunk("Freshness.lua")("SGDDReserves", ns)
 	chunk("Whisper.lua")("SGDDReserves", ns)
+	chunk("Protocol.lua")("SGDDReserves", ns)
+	chunk("Consolidation.lua")("SGDDReserves", ns)
 	chunk("Import.lua")("SGDDReserves", ns)
 	return ns
 end

@@ -50,6 +50,11 @@ files["spec/"] = {
 globals = {
 	-- Ours
 	"SGDDReservesDB",
+
+	-- Blizzard's popup registry. Written to, not just read: Sync.lua adds the
+	-- accept dialog to it. Declared as a global rather than a read_global for
+	-- exactly that reason.
+	"StaticPopupDialogs",
 }
 
 read_globals = {
@@ -96,6 +101,20 @@ read_globals = {
 	"Enum",
 	"ItemRefTooltip",
 	"RAID_CLASS_COLORS",
+
+	-- Secret values, 12.0. The only screen that works: type() reports a secret
+	-- string as "string". Read in exactly one place, ns.IsSecret in Core.lua.
+	"issecretvalue",
+
+	-- The raider-facing half. Sync.lua sends on our own prefix via AceComm,
+	-- which RCLootCouncil loads -- nothing here is embedded. The dialog is
+	-- Blizzard's StaticPopup, and InCombatLockdown is what keeps a window from
+	-- arriving over somebody's action bars mid-pull.
+	"StaticPopup_Show",
+	"InCombatLockdown",
+	"IsInGroup",
+	"YES",
+	"NO",
 
 	-- Misc
 	"LibStub",

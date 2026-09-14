@@ -66,6 +66,10 @@ function Reservers.For(set, itemId)
 			realm = char and RealmOf(char.key) or nil,
 			tier = tier,
 			class = char and char.class or nil,
+			-- The folded key, carried through so a caller can ask "is one of
+			-- these me" without re-folding a display name that may have had a
+			-- realm appended to it by the collision rule below.
+			key = folded,
 		}
 	end
 

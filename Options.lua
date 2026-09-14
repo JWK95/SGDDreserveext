@@ -85,14 +85,58 @@ local function Table()
 				name = "Turning this off stops the line appearing immediately. The line only ever shows on "
 					.. "your own screen, and only for items on the list you imported.",
 			},
-			gap3 = { order = 9, type = "header", name = "What raiders see" },
-			observe = {
+			gap3 = { order = 9, type = "header", name = "Loot windows" },
+			autoReserves = {
 				order = 10,
+				type = "toggle",
+				width = "full",
+				name = "Open the reserve window when loot starts",
+				desc = "Shows every item up for loot, who reserved each one, and what you reserved tonight.",
+				get = function() return ns.Options().autoOpenReserves end,
+				set = function(_, v) ns.Options().autoOpenReserves = v end,
+			},
+			autoResponses = {
+				order = 11,
+				type = "toggle",
+				width = "full",
+				name = "Open the responses window when loot starts",
+				desc = "Shows what each candidate answered and what they rolled.",
+				get = function() return ns.Options().autoOpenResponses end,
+				set = function(_, v) ns.Options().autoOpenResponses = v end,
+			},
+			windowNote = {
+				order = 12,
 				type = "description",
-				name = "This addon shows nothing on a raider's client. If you want raiders to see the "
-					.. "session and what everybody rolled, turn on RCLootCouncil's own |cffffffffObserve|r "
-					.. "setting (Master Looter settings). It is per master looter, so whoever is running "
-					.. "loot that night needs it on.",
+				name = "Both windows wait until you are out of combat before opening. "
+					.. "Reopen them any time with |cffffffff/rc askml|r.",
+			},
+			gap4 = { order = 13, type = "header", name = "The master looter's list" },
+			accept = {
+				order = 14,
+				type = "toggle",
+				width = "full",
+				name = "Offer to import the master looter's reserves",
+				desc = "When the master looter starts a loot session, ask whether to import the list they are holding. "
+					.. "You are asked once per list, not once per boss.",
+				get = function() return ns.Options().acceptReserveSync end,
+				set = function(_, v) ns.Options().acceptReserveSync = v end,
+			},
+			acceptNote = {
+				order = 15,
+				type = "description",
+				name = "Turning this off stops the prompt. You can still ask deliberately with "
+					.. "|cffffffff/rc askml|r. Reserve data only ever travels from the master looter "
+					.. "to the raid, and only they can send it.",
+			},
+			gap5 = { order = 16, type = "header", name = "What raiders see of the session" },
+			observe = {
+				order = 17,
+				type = "description",
+				name = "Raiders see the reserves you hand out, but RCLootCouncil decides whether they can "
+					.. "see |cffffffffother people's responses and rolls|r. That is its own "
+					.. "|cffffffffObserve|r setting (Master Looter settings), and this addon honours it -- "
+					.. "with it off, a raider sees only their own answer. It is per master looter, so "
+					.. "whoever is running loot that night needs it on.",
 			},
 		},
 	}
@@ -146,4 +190,18 @@ function OptionsPanel:RegisterChatCommand()
 
 	pcall(rc.ModuleChatCmd, rc, ns.OfficerFrame, "Show", nil,
 		"Open the SGDD Reserves import window (alt. 'sr')", "reserves", "sr")
+
+	-- The raider's command. Named for the person it actually asks: the reserve
+	-- list lives with the MASTER LOOTER, who is frequently not the raid leader,
+	-- and a raider who reads a name like "askraidleader" and then goes and asks
+	-- their raid leader why it is not working has been misled by us.
+	--
+	-- Same baseName/version requirement as above, and for the same reason --
+	-- "/rc help" walks every registered command, so a table missing them throws
+	-- inside RCLootCouncil's loop rather than ours.
+	ns.Sync.baseName = ns.ADDON
+	ns.Sync.version = ns.OfficerFrame.version
+
+	pcall(rc.ModuleChatCmd, rc, ns.Sync, "AskML", nil,
+		"Ask the master looter for tonight's reserve list and open the loot windows", "askml")
 end

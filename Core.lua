@@ -4,13 +4,29 @@
 -- no work during combat, and nothing built until it is asked for. Parsing
 -- happens exactly once, when a string is pasted.
 --
--- At rest -- which is every client that has never imported, meaning every
--- raider -- the addon holds exactly two registered events, ADDON_LOADED and
--- PLAYER_ENTERING_WORLD, and nothing else. The whisper responder, the encounter
--- queue and the session-start subscription are registered when a dataset
--- appears and torn down when one goes away. Since only the master looter ever
--- imports, "has data" IS the officer scope, and a raider who installs this
--- addon runs nothing.
+-- At rest the addon holds THREE registered events -- ADDON_LOADED,
+-- PLAYER_ENTERING_WORLD and GROUP_ROSTER_UPDATE -- and nothing else. It used to
+-- be two, and the third arrived with the raider-facing half: a client has to be
+-- able to notice it joined a raid, and no other event says so.
+--
+-- "At rest" also means something narrower than it used to. It was every client
+-- that had never imported, which was every raider. Now a raider in a raid group
+-- registers an addon-comm handler so the master looter can hand them tonight's
+-- reserves (Sync.lua), and their windows draw. Outside a raid group they are
+-- back to the three events and nothing else, and a raider who never joins a
+-- raid still runs nothing.
+--
+-- TWO SCOPES, and keeping them apart is the whole trick:
+--
+--   IsOfficerClient()  sticky, keyed on everImported. The voting column, the
+--                      whisper responder, the stale-import warning. An officer
+--                      whose data was cleared is still an officer, because they
+--                      still have to be able to say "I have no list".
+--   InRaidScope()      not sticky, keyed on being in a raid group. The sync
+--                      handler and the windows. Tears down on leaving.
+--
+-- Nothing may key officer behaviour off "has data", because a raider now has
+-- data too. That is why received lists live in their own slot.
 
 local ADDON, ns = ...
 
@@ -41,6 +57,51 @@ function ns.Shout(msg)
 	if RaidNotice_AddMessage and RaidWarningFrame then
 		pcall(RaidNotice_AddMessage, RaidWarningFrame, tostring(msg), ChatTypeInfo["RAID_WARNING"])
 	end
+end
+
+--------------------------------------------------------------------------------
+-- Secret values
+--------------------------------------------------------------------------------
+
+-- The one place in this addon that knows what a secret value is.
+--
+-- A secret is a value tainted code -- which is every line of every addon --
+-- may hold, pass along and concatenate, but may not compare, index, take the
+-- length of, or store as a table key. Reading one the wrong way is an
+-- immediate Lua error, not a wrong answer.
+--
+-- Two things about them are counter-intuitive enough to be worth writing down,
+-- because this addon assumed both of them wrong until a raid said otherwise.
+--
+-- FIRST: type() returns the REAL type. A secret string answers "string", so
+-- every `if type(x) ~= "string" then return nil end` in this codebase screens
+-- exactly nothing -- the secret walks through it into the gsub on the next
+-- line. issecretvalue is the only screen that exists. Names.Fold, Names.Split,
+-- Reservers.RealmOf and RC:CurrentItemId all carry that guard and none of them
+-- is protected by it; they are pure or foreign-facing, so the screening is done
+-- HERE, at each point a value crosses in from the game.
+--
+-- SECOND: concatenation and string.format are ALLOWED, and they propagate.
+-- Folding a secret into a message produces a secret message, silently, and no
+-- error arrives until that message reaches something that needs real bytes --
+-- GameTooltip:AddLine, FontString:SetText, SendChatMessage. The throw lands a
+-- long way from the value that caused it, in code that looks blameless. That is
+-- exactly how this presented: "attempt to perform string conversion on a secret
+-- string value", out of a tooltip, blamed on whichever addon's execution we
+-- happened to be running inside.
+--
+-- Variadic because most call sites have more than one value to clear before
+-- they touch any of them, and clearing them one at a time is how you clear
+-- three and forget the fourth.
+local issecret = issecretvalue
+
+function ns.IsSecret(...)
+	-- Before 12.0 there is no such thing, so there is nothing to screen.
+	if not issecret then return false end
+	for i = 1, select("#", ...) do
+		if issecret((select(i, ...))) then return true end
+	end
+	return false
 end
 
 --------------------------------------------------------------------------------
@@ -79,6 +140,21 @@ local function InitDB()
 	if SGDDReservesDB.options.showTooltipReserves == nil then
 		SGDDReservesDB.options.showTooltipReserves = true
 	end
+	-- Both windows open themselves when a loot session starts. The off switch
+	-- exists for the same reason the tooltip's does: somebody who finds two
+	-- frames intrusive needs an answer that is not "uninstall".
+	if SGDDReservesDB.options.autoOpenReserves == nil then
+		SGDDReservesDB.options.autoOpenReserves = true
+	end
+	if SGDDReservesDB.options.autoOpenResponses == nil then
+		SGDDReservesDB.options.autoOpenResponses = true
+	end
+	-- Whether to offer the master looter's list at all. Off means no dialog
+	-- ever, for somebody who does not want to be asked; the offer still arrives
+	-- and is discarded unread, and /rc askml still works for a deliberate ask.
+	if SGDDReservesDB.options.acceptReserveSync == nil then
+		SGDDReservesDB.options.acceptReserveSync = true
+	end
 end
 
 function ns.Options()
@@ -116,6 +192,41 @@ end
 -- inert: they never import, so it never flips.
 function ns.IsOfficerClient()
 	return (SGDDReservesDB and SGDDReservesDB.everImported) == true
+end
+
+-- The list a RAIDER received over the wire, kept in its own slot.
+--
+-- Deliberately NOT merged into .set, and the separation is the point. `.set` is
+-- "what I imported", and half this addon keys officer behaviour off it --
+-- ns.Data() gates the voting column, everImported gates the whisper responder
+-- and the stale-import warning. Routing received data through the same variable
+-- would silently switch officer surfaces on for twenty-five raiders, and the
+-- symptom would be an SR column appearing in somebody's voting frame with no
+-- explanation. Two slots, two meanings, no shared variable whose sense depends
+-- on which client is reading it.
+--
+-- Sync.lua writes this. It never sets everImported, so a raider stays a raider.
+function ns.ReceivedSet()
+	local set = SGDDReservesDB and SGDDReservesDB.received
+	if set and set.exportedAt then return set end
+	return nil
+end
+
+-- The best list THIS client has, whoever they are: an officer's own import if
+-- there is one, otherwise whatever the master looter handed out.
+--
+-- For read-only display only -- the reserve window and the tooltip. Nothing
+-- that decides scope may call this, because "do I have a list" and "am I an
+-- officer" are the two questions this addon must never conflate again.
+function ns.AnySet()
+	return ns.ImportedSet() or ns.ReceivedSet()
+end
+
+-- The export timestamp of the last list this client accepted from the wire.
+-- Protocol.ShouldPrompt compares against it, so a raider is asked once per
+-- list rather than once per boss.
+function ns.LastAcceptedAt()
+	return SGDDReservesDB and SGDDReservesDB.lastAcceptedAt
 end
 
 --------------------------------------------------------------------------------
@@ -243,6 +354,13 @@ end
 -- to just the name and would match a same-named character on any realm, so the
 -- home realm is supplied when the game omits it.
 function ns.FoldGameName(fullName)
+	-- First, because the equality test on the next line is a comparison and the
+	-- match after it is a string operation, and both are errors on a secret.
+	-- Responder guards the whisper sender against chat messaging lockdown
+	-- already, but lockdown is not the only thing that makes a name secret and
+	-- the set of things that do has grown in every patch since 12.0.
+	if ns.IsSecret(fullName) then return nil end
+
 	if type(fullName) ~= "string" or fullName == "" then return nil end
 
 	local name, realm = fullName:match("^([^%-]+)%-(.+)$")
@@ -286,13 +404,38 @@ end
 
 -- Called whenever the dataset may have appeared or gone away. Everything that
 -- costs anything at rest hangs off this one switch.
+-- Is this client somewhere the raider-facing half should be running?
+--
+-- NOT sticky, unlike IsOfficerClient. An officer must stay an officer after
+-- their data is cleared, because they still have to be able to say "I have no
+-- list"; a raider has no such obligation, so this can be exactly what it says
+-- and tear down when it stops being true. Outside a raid group the addon is
+-- back to its two events and nothing else.
+--
+-- Raid only. Inside a Mythic+ key the ChallengeMode restriction refuses addon
+-- sends for the whole dungeon, so the announce never lands and a request comes
+-- back refused for twenty minutes -- a feature that degrades confusingly in a
+-- place nobody reserved items for. Reserves are a raid artefact: the website
+-- wipes them against the weekly raid reset, which is the boundary the whole of
+-- Freshness.lua is built on.
+function ns.InRaidScope()
+	local inInstance, kind = IsInInstance()
+	if inInstance and kind ~= "raid" then return false end
+	return IsInRaid() == true
+end
+
+-- Each switch guarded separately, and that is the point: without this, one
+-- module throwing means every module after it in this list never runs. An
+-- officer whose voting column broke would silently also lose the whisper
+-- responder, the stale warning and the sync -- four failures reported as none.
 function ns.UpdateScope()
-	if ns.VotingColumn then ns.VotingColumn:Refresh() end
-	if ns.Responder then ns.Responder:SetActive() end
-	if ns.Nag then ns.Nag:SetActive() end
+	if ns.VotingColumn then ns.Guard("voting column", ns.VotingColumn.Refresh, ns.VotingColumn) end
+	if ns.Responder then ns.Guard("whisper responder", ns.Responder.SetActive, ns.Responder) end
+	if ns.Nag then ns.Guard("stale-import warning", ns.Nag.SetActive, ns.Nag) end
+	if ns.Sync then ns.Guard("reserve sync", ns.Sync.SetActive, ns.Sync) end
 	-- One way only: the tooltip callback cannot be unregistered once added, so
 	-- this switch turns on and never off. See Tooltip.lua.
-	if ns.Tooltip then ns.Tooltip:SetActive() end
+	if ns.Tooltip then ns.Guard("item tooltip", ns.Tooltip.SetActive, ns.Tooltip) end
 end
 
 --------------------------------------------------------------------------------
@@ -304,11 +447,35 @@ local events = CreateFrame("Frame")
 events:RegisterEvent("ADDON_LOADED")
 events:RegisterEvent("PLAYER_ENTERING_WORLD")
 
+-- The third at-rest event, and it is a real addition to the budget rather than
+-- a free one. The raider-facing half turns on when this client joins a raid and
+-- off when it leaves, and there is no way to learn the first of those without
+-- listening for it -- PLAYER_ENTERING_WORLD does not fire when a raid invite is
+-- accepted in a capital city.
+--
+-- It is cheap in the way that matters: it fires on roster changes, not on a
+-- timer, and its handler is one boolean compared against a stored one. It does
+-- no work when the answer has not changed.
+events:RegisterEvent("GROUP_ROSTER_UPDATE")
+
 events:SetScript("OnEvent", function(_, event, arg1)
 	if event == "ADDON_LOADED" then
 		if arg1 ~= ADDON then return end
 		InitDB()
 		events:UnregisterEvent("ADDON_LOADED")
+		return
+	end
+
+	if event == "GROUP_ROSTER_UPDATE" then
+		-- Only when the answer actually changed. GROUP_ROSTER_UPDATE fires for
+		-- every join, leave, promotion and zone-in of every member, and doing
+		-- real work on each of those in a twenty-five person raid is exactly
+		-- the kind of cost this addon promises not to have.
+		local now = ns.InRaidScope()
+		if now ~= ns.raidScope then
+			ns.raidScope = now
+			ns.UpdateScope()
+		end
 		return
 	end
 
@@ -321,6 +488,7 @@ events:SetScript("OnEvent", function(_, event, arg1)
 			ns.OptionsPanel:Register()
 			ns.OptionsPanel:RegisterChatCommand()
 		end
+		ns.raidScope = ns.InRaidScope()
 		ns.UpdateScope()
 
 		local inInstance, kind = IsInInstance()

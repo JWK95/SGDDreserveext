@@ -192,42 +192,69 @@ Import.ParsePayload = ParsePayload
 -- Public entry point
 --------------------------------------------------------------------------------
 
--- Returns ok, message.
-function Import.Paste(str)
+-- Decode an export string into a set. Returns set, trimmed-source, or
+-- nil, reason.
+--
+-- Extracted so that a list arriving over the wire runs THIS code and not a
+-- second copy of it. A raider receives the officer's export string verbatim,
+-- so it passes the same envelope check, the same major version check, the same
+-- base64 decode, the same deflate and the same record parser. There is exactly
+-- one way to turn a string into a dataset in this addon, and that is what makes
+-- "the raider is looking at the same list as the officer" a fact rather than a
+-- hope.
+local function Decode(str)
 	if type(str) ~= "string" or str:match("^%s*$") then
-		return false, "nothing to import"
+		return nil, "nothing to import"
 	end
 
 	str = str:match("^%s*(.-)%s*$")
 
 	local major, blob = str:match("^SGDDR:(%d+):(.+)$")
 	if not major then
-		return false, "that is not an SGDD Reserves export string"
+		return nil, "that is not an SGDD Reserves export string"
 	end
 	if tonumber(major) ~= ns.VERSION_MAJOR then
-		return false, VersionMessage(major)
+		return nil, VersionMessage(major)
 	end
 
 	if not LibDeflate then
-		return false, "LibDeflate is missing; reinstall the addon"
+		return nil, "LibDeflate is missing; reinstall the addon"
 	end
 
 	local raw, err = DecodeBase64(blob)
 	if not raw then
-		return false, "could not read that string -- " .. err
+		return nil, "could not read that string -- " .. err
 	end
 
 	local text = LibDeflate:DecompressDeflate(raw)
 	if not text then
-		return false, "could not decompress that string -- it is probably an incomplete copy"
+		return nil, "could not decompress that string -- it is probably an incomplete copy"
 	end
 
 	local set, reason = ParsePayload(text)
 	if not set then
-		return false, reason
+		return nil, reason
+	end
+
+	return set, str
+end
+
+Import.Decode = Decode
+
+-- Returns ok, message.
+function Import.Paste(str)
+	local set, source = Decode(str)
+	if not set then
+		return false, source
 	end
 
 	set.importedAt = time()
+
+	-- Kept so the master looter can hand it out unchanged. The bytes a raider
+	-- receives are the bytes the officer pasted -- see Protocol.lua for why
+	-- re-serialising the parsed table instead would be a second source of
+	-- truth and therefore a second set of rules to keep in step.
+	set.source = source
 
 	-- Replace wholesale, never merged with what it replaces: reserves are wiped
 	-- weekly on the website, and a merge resurrects picks that were deliberately
@@ -250,6 +277,53 @@ function Import.Paste(str)
 		:format(set.reserveCount, set.reserveCount == 1 and "" or "s", set.exportedAt)
 
 	return true, msg, Import.MatchReport()
+end
+
+--------------------------------------------------------------------------------
+-- A list arriving from the master looter
+--------------------------------------------------------------------------------
+
+-- Returns ok, message.
+--
+-- The raider-side twin of Paste, and every difference between the two is
+-- deliberate:
+--
+--   * it writes .received, never .set
+--   * it does NOT set everImported
+--   * it does NOT warn about match failures
+--
+-- The first two together are what keep a raider a raider. everImported is the
+-- officer scope switch -- it gates the whisper responder, the stale-import
+-- warning and (belt and braces) the voting column -- and setting it here would
+-- turn twenty-five raiders into twenty-five clients that answer "!wdir" on
+-- behalf of an officer. A raider who receives a list has a list; they have not
+-- become the person who hands them out.
+--
+-- The third is because MatchReport is the officer's alarm for a key mismatch
+-- between the website and the game. It is the same fact on a raider's client,
+-- but the raider cannot fix it and cannot tell whether the officer already
+-- knows -- so telling twenty-five people about it produces twenty-five
+-- whispers to one officer about a problem they are already looking at.
+function Import.AcceptFromWire(exportString)
+	local set, reason = Decode(exportString)
+	if not set then
+		return false, reason
+	end
+
+	set.importedAt = time()
+	set.source = exportString
+
+	ns.DB().received = set
+
+	-- What ShouldPrompt compares against, so this raider is not asked about the
+	-- same list again on the next boss.
+	ns.DB().lastAcceptedAt = set.exportedAt
+
+	if ns.WarmItemCache then ns.WarmItemCache(set) end
+	if ns.UpdateScope then ns.UpdateScope() end
+
+	return true, ("got %d reserve%s from the master looter, generated %s")
+		:format(set.reserveCount, set.reserveCount == 1 and "" or "s", set.exportedAt)
 end
 
 -- Does this group member's name fold to a character the imported list knows?

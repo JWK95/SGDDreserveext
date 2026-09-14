@@ -55,13 +55,33 @@ local function OnItem(tooltip, data)
 
 	if not ns.Options().showTooltipReserves then return end
 
-	local set = ns.Data()
-	if not set then return end
+	-- AnySet, not Data: an officer's own import if there is one, otherwise the
+	-- list the master looter handed out. A raider who accepted tonight's
+	-- reserves gets the same "Reserved by" line an officer does, on the same
+	-- data, which is the point -- they are the people who most often want to
+	-- know whether hovering a drop is worth arguing about.
+	local set = ns.AnySet()
+	if not set or set.reserveCount == 0 then return end
+
+	-- Secret values, and why the check is here rather than deeper in.
+	--
+	-- This callback runs inside whatever execution asked for the tooltip, which
+	-- is very often not us: a unit frame addon, a bag addon, anything that calls
+	-- GameTooltip:SetItemByID. So the payload can describe an item belonging to
+	-- somebody whose identity the game is currently keeping secret, and the
+	-- error is attributed to whichever addon tainted that execution path -- not
+	-- to us, which is what made it so hard to place.
+	--
+	-- `data` first, because the very next line indexes it, and indexed access on
+	-- a secret is an immediate error. `data.id` next, because Reservers.For uses
+	-- it as a table key and a secret cannot be one.
+	if ns.IsSecret(data) then return end
 
 	-- The item id arrives directly on the tooltip data. Not GetItem(), which
 	-- RCLootCouncil-era code used and which Blizzard's own source marks as a
 	-- temporary replacement pending removal.
 	local itemId = data and data.id
+	if ns.IsSecret(itemId) then return end
 	if not itemId then return end
 
 	local result = Reservers.For(set, itemId)
@@ -69,6 +89,21 @@ local function OnItem(tooltip, data)
 
 	local line = Reservers.Line(result, Colourize)
 	if not line then return end
+
+	-- The boundary check, and the honest status of it: UNPROVEN. The two guards
+	-- above are mutation-tested -- delete either and the harness throws, the id
+	-- one with the exact message the raid reported. Delete this one and nothing
+	-- fails, because every ingredient of `line` is data we imported ourselves,
+	-- so today it cannot be secret.
+	--
+	-- It stays anyway, and this is the reasoning rather than a habit: AddLine is
+	-- where a secret string would finally have to become real bytes, and format
+	-- and concat propagate secrecy in silence, so a future secret anywhere
+	-- upstream surfaces HERE and nowhere earlier. The watch list says the set of
+	-- secret values grows every patch. One predicate call, on a line we are
+	-- about to draw anyway, against an error on every tooltip redraw -- which is
+	-- how this arrived: 537 of them in one night.
+	if ns.IsSecret(line) then return end
 
 	tooltip:AddLine(" ")
 	-- Wrapped: fifteen names is wider than any tooltip, and the alternative to
@@ -91,9 +126,20 @@ end
 -- It is also why the option is checked INSIDE the callback rather than by
 -- tearing the callback down: turning the setting off has to stop the line
 -- appearing, and unregistering is not available to do it.
+-- The scope widened with the raider-facing half, and the cost widened with it.
+--
+-- It used to register only on an officer's client, because only an officer had
+-- data. A raider who accepts a reserve list now has data too, so the line is
+-- available to them -- which was asked for deliberately, with this trade
+-- understood: the first time a raider accepts a list, this callback is added to
+-- their client and held until they log out, even if they later clear the data
+-- or turn the setting off. Turning the setting off stops the LINE, because the
+-- option is checked inside the callback; it cannot stop the callback.
+--
+-- What has not changed: a raider who never accepts a list registers nothing.
 function Tooltip:SetActive()
 	if self.registered then return end
-	if not ns.IsOfficerClient() then return end
+	if not (ns.IsOfficerClient() or ns.ReceivedSet()) then return end
 
 	local processor = TooltipDataProcessor
 	if not processor or type(processor.AddTooltipPostCall) ~= "function" then return end

@@ -74,6 +74,29 @@ Standing proofs, all mutation-tested:
   comparison changed nothing and the test passed either way. The fix was to
   arrange the names in the opposite order to the difficulties, which is the
   only thing that makes that comparison load-bearing.
+- `spec/guard_spec.lua` — reporting every occurrence instead of once per site,
+  swallowing a failure silently, returning the wrong answer to the caller, and
+  **building the report outside the `pcall`**. That last one was a real bug,
+  found by testing rather than by reading: written the obvious way,
+  `pcall(ns.Warn, ("…"):format(tostring(err)))` builds the message *before*
+  `pcall` is entered, so an error object that cannot be turned into bytes throws
+  straight out of the error handler — the guard defeating itself at the one
+  moment it matters. Every other test in that file passes either way; only an
+  error whose `__tostring` throws distinguishes them, which is what a secret
+  value reaching an error message actually looks like.
+- `spec/protocol_spec.lua` — accepting any wire version, accepting a payload
+  from a sender who is not the master looter, accepting one while the master
+  looter is still `"Unknown"`, broadcasting per request instead of coalescing,
+  re-prompting for a list already accepted, collapsing the four outcomes into
+  one message.
+- `spec/consolidation_spec.lua` — showing other candidates' responses when
+  `observe` is off, reversing the row order, dropping the name tiebreak. **The
+  ordering fixture repeats the lesson `reservers_spec` learned**: the names run
+  in the opposite direction to the rolls, because that is the only arrangement
+  where deleting the roll comparison changes the answer. The tiebreak gets its
+  own two-row fixture inserted reverse-alphabetically, because Lua's sort makes
+  exactly one comparison on two elements and that is the only arrangement where
+  dropping the tiebreak is deterministic rather than luck.
 
 ## Invariants
 
@@ -83,19 +106,50 @@ Standing proofs, all mutation-tested:
   does not set a response, pre-sort a session, filter a candidate, or warn
   before an award. Officers make the decisions; the addon supplies context. A
   change that would alter RCLootCouncil's behaviour does not belong here, no
-  matter how useful.
+  matter how useful. **This one is still absolute.**
 - **It reads RCLootCouncil's wire; it never writes to it.** `RC.lua` subscribes
-  to the `RCLC` prefix to learn that a session started. It opens no prefix of
-  its own, sends no addon message, and there is no sync protocol between
-  clients.
-- **The one thing it sends is a whisper, in reply, when asked.**
+  to the `RCLC` prefix for `lootTable`, `response` and `roll`. It never sends on
+  that prefix and never calls `Comms:RegisterPrefix`, which would mutate
+  RCLootCouncil's own `PREFIXES` table. **Still absolute.**
+- **It has a prefix of its own, and that is new.** `SGDDRsv`, owned by
+  `Sync.lua`, carrying reserve data **one way** from the master looter to the
+  raid so a raider can be reminded what they reserved when an item drops.
+  "There is no sync protocol between clients" used to be true and is now
+  narrower rather than gone. The trade: raiders could not see their own reserves
+  without whispering an officer, and every alternative was worse — raiders
+  pasting the export themselves resurrects the personal export this addon
+  deleted, and a whisper-driven query makes the master looter a query server for
+  twenty-five people and is deaf during the encounter the loot comes from.
+  `docs/sync-protocol.md` is the contract. Our prefix is not theirs, so the
+  server's per-prefix throttle allowance is ours to spend and cannot starve
+  RCLootCouncil's.
+- **The one thing it sends by chat is a whisper, in reply, when asked.**
   `Responder.lua`, from the master looter's client only. That is a real
   widening of "read-only" and it is deliberate: it is what let the personal
   export die, because a raider now needs no addon at all.
-- **It is inert on a raider's client.** They never import, so nothing registers
-  and nothing draws. What raiders see of a live session is RCLootCouncil's own
-  `observe` setting, which is the master looter's to turn on and none of our
-  business.
+- **It is inert on a raider's client — outside a raid group.** This one changed
+  too. A raider in a raid registers an addon-comm handler and can be offered the
+  master looter's list; accepting one draws two windows and a tooltip line.
+  Outside a raid group they are back to three registered events and nothing
+  else, and a raider who never joins a raid still runs nothing.
+- **What raiders see of a live session is still RCLootCouncil's `observe`
+  setting, and we honour it.** This is the one where "we can" and "we should"
+  came apart, so read it before changing it. Candidate responses travel over
+  RCLootCouncil's group channel to **every** client; `RCVotingFrame` simply does
+  not subscribe unless the viewer is council or `observe` is on, so the bytes
+  arrive and are dropped. We subscribe through the same supported extension
+  point, which means we **can** read every response on any client regardless of
+  what the officer chose. We do not. `observe` defaults to off, it is broadcast
+  by the master looter, and its own description is "Allows non-council members
+  to see the voting frame" — an officer who leaves it off has decided what the
+  raid sees. Routing around that would make this addon's selling point "it shows
+  you what your officers turned off", which is how an addon gets banned from a
+  guild rather than adopted. With `observe` off a raider sees their own response
+  and a count of what is hidden, and is told the setting exists.
+  `Consolidation.lua` owns that decision and `spec/consolidation_spec.lua`
+  mutation-tests it. Note the asymmetry, which is deliberate: the *reserve* half
+  is not gated this way, because reserves are our data, imported from the
+  guild's own website and handed out by the master looter on purpose.
 
 ### Silent failures
 
@@ -130,6 +184,25 @@ Standing proofs, all mutation-tested:
   refuses loudly and names the version instead. Said once, at
   `PLAYER_ENTERING_WORLD` — a message on every zone-in is a message people
   filter out.
+
+### Secret values are screened with `ns.IsSecret`, never with `type()`
+
+`Core.lua` holds the only read of `issecretvalue` in the addon. Everything else
+calls `ns.IsSecret`, at the point a value crosses in from the game and **before**
+the first thing that would touch it.
+
+Two facts drive it, and this addon had both wrong until a raid produced 537
+errors in a night. **`type()` returns the real type** — a secret string answers
+`"string"`, so every `if type(x) ~= "string"` guard in this codebase screens
+nothing. And **concat and `string.format` are permitted and propagate secrecy
+silently**, so the error surfaces not where the secret entered but wherever the
+message finally needs real bytes: `AddLine`, `SetText`, `SendChatMessage`.
+
+`Tooltip.lua` is the exposed one, because its callback runs inside *whoever*
+asked for the tooltip — so the error is attributed to that addon, not to us, and
+`debugstack` is itself secret. There is no stack to read; the only way in is
+knowing which of our own values could be secret. `docs/in-game-gotchas.md` #6
+has the full account and says which guards are proved and which are not.
 
 ### Freshness is measured against the reset, not the clock
 
@@ -166,12 +239,27 @@ out of the way.
   than by tearing the callback down: turning the setting off has to stop the
   line appearing, and unregistering is not available to do it. The callback's
   first act is the cheapest possible rejection.
-- **At rest the addon holds two registered events**, `ADDON_LOADED` and
-  `PLAYER_ENTERING_WORLD`. Everything else — the whisper handler, the session
-  subscription — hangs off `ns.UpdateScope()` and is
-  registered only on a client that has imported at least once. Since only the
-  master looter imports, that *is* the officer scope, and a raider who installs
-  the addon runs nothing.
+- **At rest the addon holds three registered events**, `ADDON_LOADED`,
+  `PLAYER_ENTERING_WORLD` and `GROUP_ROSTER_UPDATE`. It was two; the third
+  arrived with the raider-facing half, because a client has to be able to notice
+  it joined a raid and no other event says so. Its handler compares one boolean
+  against a stored one and does nothing when the answer has not changed —
+  `GROUP_ROSTER_UPDATE` fires for every join, leave and promotion of every
+  member, so doing real work per event in a twenty-five person raid is exactly
+  the cost this addon promises not to have.
+- **There are two scopes now, and conflating them is the bug to watch for.**
+  `ns.IsOfficerClient()` is sticky, keyed on `everImported`: the voting column,
+  the whisper responder, the stale-import warning. An officer whose data was
+  cleared is still an officer, because they still have to be able to say "I have
+  no list". `ns.InRaidScope()` is *not* sticky, keyed on being in a raid group:
+  the sync handler and the two windows, torn down on leaving. **Nothing may key
+  officer behaviour off "has data" any more**, because a raider has data too —
+  which is why a received list lives in `SGDDReservesDB.received` and never in
+  `.set`, and why `everImported` is not set by `Import.AcceptFromWire`.
+  `VotingColumn:Register` carries both gates on purpose: separate storage
+  already makes `ns.Data()` nil for a raider, and a rule that holds only by the
+  accident of which table a value landed in is a rule waiting for the next
+  feature to break it.
 - **`reserves` is indexed by item id, not a list.** The cell update runs once
   per candidate per redraw of a live loot session, so its lookup must be O(1). A
   list scanned per cell is the one place this addon could become something you
@@ -179,8 +267,13 @@ out of the way.
 - **Frames are built on first use.** An officer who never opens the import
   window pays for none of it. `GET_ITEM_INFO_RECEIVED` is registered only while
   that window is open, and coalesces a batch into one redraw.
-- **No minimap button, and no slash command of our own.** `/rc reserves`, via
-  RCLootCouncil's `ModuleChatCmd`.
+- **No minimap button, and no slash command of our own.** `/rc reserves` (the
+  officer's import window) and `/rc askml` (the raider's fetch), both via
+  RCLootCouncil's `ModuleChatCmd`. `askml` is named for the person it actually
+  asks: the list lives with the **master looter**, who is frequently not the
+  raid leader, and a raider who reads a name like `askraidleader` and then goes
+  and asks their raid leader why it is not working has been misled by us. Both
+  tables carry `baseName` and `version` — see the `ModuleChatCmd` rule below.
 
 ### Whispers
 
@@ -228,14 +321,31 @@ out of the way.
 
 ## Where the code is
 
-**Pure, and covered by `spec/`:** `Names.lua` key folding · `Tiers.lua` the
+**Every entry point from outside is wrapped in `ns.Guard`.** `Guard.lua`. An
+addon message, a comm subscription, a dialog button, a chat command, a frame
+script — anywhere our code is entered from somebody else's. Three reasons, and
+all three are things this addon has already paid for: an error thrown inside
+another addon's dispatch is *attributed to them* and can take out the other
+subscribers to that message; a handler that throws throws for **every** message,
+and 537 errors in a night is a real number from this repo's history; and with
+`debugstack` itself secret there may be no stack, so the report has to say our
+name. It reports **once per site** and never makes a failure silent — the caller
+gets `false` and decides what the user sees. `ns.UpdateScope` guards each switch
+separately, because without that one broken module means every module after it
+in the list silently never runs.
+
+**Pure, and covered by `spec/`:** `Guard.lua` the error boundary ·
+`Names.lua` key folding · `Tiers.lua` the
 difficulty vocabulary — the website stores difficulties (`Mythic`), the guild
 speaks tracks (`Myth`), and this is the only place that translates ·
 `Reservers.lua` who reserved a given item, in the order an officer reads it,
 including the cross-realm name collision rule · `Schema.lua` the shape of the
 dataset, separate from Core so tests can build one without `CreateFrame` ·
 `Freshness.lua` is the list still good for tonight · `Whisper.lua` what `!wdir`
-means and what comes back.
+means and what comes back · `Protocol.lua` what crosses the wire between a
+master looter and a raider, which versions may talk, who may hand out a list,
+and when a request is already answered · `Consolidation.lua` whose responses a
+raider may see and in what order.
 
 **The tier vocabulary is addon-side only.** `docs/export-format.md` is unchanged
 and the website keeps sending `Mythic`/`Heroic`/`Normal`/`LFR`. Translating on
@@ -247,10 +357,16 @@ vocabulary that drifts between them is how a raider ends up asking an officer
 what the difference is mid-pull.
 
 **Everything else:** `Core.lua` state, events, scope, display helpers ·
-`Import.lua` base64, deflate, parse · `RC.lua` **every handle into
+`Import.lua` base64, deflate, parse, and the two ways a list arrives —
+`Paste` (officer, writes `.set`, sets `everImported`) and `AcceptFromWire`
+(raider, writes `.received`, does neither) · `RC.lua` **every handle into
 RCLootCouncil** · `VotingColumn.lua` the column spec and its cell ·
 `Responder.lua` the whisper event and cooldown · `Tooltip.lua` the
 "Reserved by:" line on item tooltips · `Nag.lua` the stale import warning ·
+`Sync.lua` the one prefix this addon sends on, the consent dialog and the
+timeout · `Responses.lua` the live per-session response store, memory only ·
+`Window.lua` shared frame chrome and the out-of-combat deferral ·
+`ReserveWindow.lua` and `ResponseWindow.lua` the two drop windows ·
 `OfficerFrame.lua` the import window · `Options.lua` the settings panel.
 
 **The item tooltip is the one place the addon draws outside RCLootCouncil's
@@ -260,8 +376,26 @@ item link clicked in chat). It deliberately does **not** decorate
 `ShoppingTooltip1/2`, the comparison tooltips: those describe the gear the
 viewer is already wearing, so a "Reserved by" line there would be attached to
 the wrong item entirely. It still changes nothing about what RCLootCouncil does
-— it is display, on this client, of data this client imported — but it is a real
+— it is display, on this client, of data this client holds — but it is a real
 widening of *where* the addon appears, so it is behind a setting.
+
+**The tooltip now shows on a raider's client too**, reading `ns.AnySet()` rather
+than `ns.Data()`, and the cost was accepted knowingly rather than discovered.
+`TooltipDataProcessor.AddTooltipPostCall` has no removal, so the first time a
+raider accepts a reserve list the callback is added to their client and held
+until they log out — even if they later clear the data or turn the setting off.
+Turning the setting off stops the *line*, because the option is checked inside
+the callback; nothing can stop the callback. A raider who never accepts a list
+registers nothing.
+
+**The two drop windows are the other place the addon draws outside
+RCLootCouncil's frames.** They are the raider-facing half and the reason the
+sync protocol exists. They open when a loot session starts, deferred to
+`PLAYER_REGEN_ENABLED` if combat happens to be up — a loot session normally
+starts on a corpse, but "normally" is not "always", and a frame arriving over
+somebody's action bars mid-pull is how an addon gets uninstalled. Both are
+behind an auto-open setting, defaulting on, for the same reason the tooltip line
+is: somebody who finds them intrusive needs an answer that is not "uninstall".
 
 `RC.lua` and `VotingColumn.lua` are the **only** two files that may name
 RCLootCouncil. That is the rule, and the reason is that they are what breaks
@@ -306,5 +440,11 @@ cutover with no transition format. So between the two deploys an officer's
 paste is refused. Hold the tag until the site's version 2 export is live, unless
 the guild has agreed to eat a raid night.
 
-CurseForge project **1685978**. The token is not configured yet and the packager
-skips that upload without it — see `NOTES-CURSEFORGE.md`.
+CurseForge project **1685978**, uploaded by the same tag. `CF_API_KEY` is
+configured; without it the packager warns and skips that upload while still
+producing the GitHub release, which means **a broken token is quiet** — the run
+stays green either way, so the log is the only proof it uploaded.
+
+`docs/releasing.md` is the runbook: the full pipeline, the preflight, how to
+rotate the token, every failure mode with its symptom, and the local Lua
+toolchain. Read that rather than reconstructing this from the workflow file.

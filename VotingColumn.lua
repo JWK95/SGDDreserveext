@@ -55,6 +55,16 @@ local AFTER_COLUMN = "name"
 -- Returns tier for this candidate on the item currently up, or nil.
 -- One table index, no scan: this runs per candidate per redraw.
 local function ReserveFor(candidateName, itemId)
+	-- Before the boolean tests below, not after. Both values come in from
+	-- outside this addon -- the name from RCLootCouncil's candidate list, the id
+	-- from its loot table -- and a secret reaching Names.Fold runs gsub and
+	-- lower on it, which is an immediate error. type(name) == "string" does not
+	-- screen that; see ns.IsSecret.
+	--
+	-- Nil is the honest answer: an empty cell means "did not reserve this", and
+	-- a candidate the game will not let us name is a candidate we cannot match.
+	if ns.IsSecret(candidateName, itemId) then return nil end
+
 	if not itemId or not candidateName then return nil end
 
 	local set = ns.Data()
@@ -206,12 +216,21 @@ end
 -- worst possible moment, and -- worse -- a column of blanks is exactly what a
 -- character-key mismatch looks like. Absent is the honest signal.
 --
--- This is also what makes the addon inert on a raider's client: they never
--- import, so they never register a column. (RCLootCouncil disables its whole
--- voting frame for non-council players anyway, unless the master looter turns
--- on its "observe" setting.)
+-- The column is OFFICER-ONLY, and both halves of that are load-bearing.
+--
+-- ns.Data() reads the officer's own imported set and nothing else, so a raider
+-- holding a list received over the wire (Sync.lua, stored separately in
+-- .received) does not make this truthy. The IsOfficerClient() gate below says
+-- the same thing a second time, on purpose: "a raider never has data" stopped
+-- being true the day raiders could receive one, and a rule that now holds only
+-- by the accident of which table a value landed in is a rule waiting to be
+-- broken by the next feature. Two gates, one intent, stated out loud.
+--
+-- (RCLootCouncil disables its whole voting frame for non-council players
+-- anyway, unless the master looter turns on its "observe" setting.)
 function VotingColumn:Register()
 	if self.registered then return end
+	if not ns.IsOfficerClient() then return end
 	if not ns.Data() then return end
 
 	local vf = ns.RC:VotingFrame()
