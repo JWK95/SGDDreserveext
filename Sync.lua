@@ -88,15 +88,21 @@ function Sync:SetActive()
 		ns.RC:SubscribeResponses(function(sender, session, response, roll)
 			if not ns.Responses then return end
 			ns.Guard("response received", function()
+				-- Recording is cheap and must happen now: the message is only
+				-- delivered once. DRAWING waits for combat to end.
 				ns.Responses:Record(sender, session, response, roll)
-				if ns.ResponseWindow then ns.ResponseWindow:Refresh() end
+				ns.WhenOutOfCombat("responses window", function()
+					if ns.ResponseWindow then ns.ResponseWindow:Refresh() end
+				end)
 			end)
 		end)
 		ns.RC:SubscribeRolls(function(name, roll, sessions)
 			if not ns.Responses then return end
 			ns.Guard("roll received", function()
 				ns.Responses:RecordRoll(name, roll, sessions)
-				if ns.ResponseWindow then ns.ResponseWindow:Refresh() end
+				ns.WhenOutOfCombat("responses window", function()
+					if ns.ResponseWindow then ns.ResponseWindow:Refresh() end
+				end)
 			end)
 		end)
 
@@ -402,7 +408,7 @@ function Sync:OnMessage(message, sender)
 
 		if accepted then
 			ns.Print(msgText)
-			ns.Guard("reserve window", function()
+			ns.WhenOutOfCombat("reserve window", function()
 				if ns.ReserveWindow then ns.ReserveWindow:Refresh() end
 			end)
 		else

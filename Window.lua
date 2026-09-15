@@ -107,49 +107,75 @@ end
 -- Combat
 --------------------------------------------------------------------------------
 
+-- NO UI WORK IN COMBAT. Not "not much" -- none.
+--
+-- This addon's weight rule has always said no work in combat, and the sync
+-- feature broke it before anyone noticed: responses and rolls arrive as comm
+-- messages, they arrive *during the pull*, and every one of them was redrawing
+-- a window. Twenty candidates answering meant twenty redraws inside
+-- RCLootCouncil's comm dispatch while a boss was up.
+--
+-- That is wrong twice over. It is work in combat, which the addon promises not
+-- to do. And drawing from tainted code during an encounter -- when the values
+-- the game hands its own UI are secret -- is a taint risk this addon has no
+-- business taking for a window nobody can read mid-pull anyway.
+--
+-- So every UI update goes through here. KEYED, so a hundred messages during one
+-- pull collapse into one redraw when combat drops, rather than a hundred queued
+-- closures. The event is registered only while something is waiting and
+-- unregistered in the handler -- it is never permanently held.
+local deferred = {}
+local waiter
+
+local function RunDeferred()
+	-- Swapped out before running: a callback that queues more work must land in
+	-- the next batch, not be dropped or cause this loop to mutate underfoot.
+	local batch = deferred
+	deferred = {}
+	for key, fn in pairs(batch) do
+		ns.Guard(key, fn)
+	end
+end
+
+function ns.WhenOutOfCombat(key, fn)
+	if not InCombatLockdown() then
+		ns.Guard(key, fn)
+		return
+	end
+
+	deferred[key] = fn
+
+	if not waiter then waiter = CreateFrame("Frame") end
+	waiter:RegisterEvent("PLAYER_REGEN_ENABLED")
+	waiter:SetScript("OnEvent", function(self)
+		-- Unregister FIRST. If a deferred call throws, this must still be torn
+		-- down -- otherwise the addon holds an event it never releases and
+		-- retries the same failure on every combat drop for the rest of the
+		-- night.
+		self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+		self:SetScript("OnEvent", nil)
+		RunDeferred()
+	end)
+end
+
 -- Opening the windows, but never over somebody's action bars mid-pull.
 --
--- A loot session normally starts on a corpse, so this normally does nothing at
--- all. "Normally" is not "always": a session can be opened while adds are still
--- up, and the whole point of the no-work-in-combat rule is that the exceptional
--- case is the one that annoys people enough to uninstall.
---
--- The deferral registers PLAYER_REGEN_ENABLED only while it is waiting, and
--- unregisters in the handler -- it is not a permanently held event.
-local pending
-
+-- A loot session normally starts on a corpse, so this normally happens
+-- immediately. "Normally" is not "always": a session can open while adds are
+-- still up, and the exceptional case is the one that annoys people enough to
+-- uninstall.
 function ns.OpenWindowsWhenSafe()
-	local opts = ns.Options()
-
-	-- Separately guarded so one window failing to build cannot take the other
-	-- with it. These are the least-tested code paths in the addon and they run
-	-- at the busiest moment of a raid night.
-	local function open()
+	ns.WhenOutOfCombat("open loot windows", function()
+		local opts = ns.Options()
+		-- Separately guarded so one window failing to build cannot take the
+		-- other with it. These are the least-tested paths in the addon and they
+		-- run at the busiest moment of a raid night.
 		if opts.autoOpenReserves ~= false and ns.ReserveWindow then
 			ns.Guard("reserve window", ns.ReserveWindow.Show, ns.ReserveWindow)
 		end
 		if opts.autoOpenResponses ~= false and ns.ResponseWindow then
 			ns.Guard("responses window", ns.ResponseWindow.Show, ns.ResponseWindow)
 		end
-	end
-
-	if not InCombatLockdown() then
-		open()
-		return
-	end
-
-	if not pending then
-		pending = CreateFrame("Frame")
-	end
-	pending:RegisterEvent("PLAYER_REGEN_ENABLED")
-	pending:SetScript("OnEvent", function(self)
-		-- Unregister FIRST. If open() throws, this must still be torn down --
-		-- otherwise the addon is left holding an event it never releases and
-		-- retrying the same failure on every combat drop for the rest of the
-		-- night.
-		self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-		self:SetScript("OnEvent", nil)
-		open()
 	end)
 end
 

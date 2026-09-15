@@ -247,6 +247,63 @@ Why no test saw it: `luacheck` would have, had the global been declared
 correctly — it was listed as writable, which is what let the assignment through.
 A lint allowlist is only as good as the entry.
 
+### 8. Action bar cooldowns threw 2172x in one encounter — UNRESOLVED
+
+**Severity: high. Seen in a raid encounter. Cause not yet established.**
+
+```
+Blizzard_ActionBar/Shared/ActionButton.lua:847: bad argument #1 to 'SetCooldown'
+  (Secret values are only allowed during untainted execution for this argument.)
+  ... ActionButton_ApplyCooldown ... ActionButton_UpdateCooldown
+  ... OnActionBarSlotChanged ... OnEvent
+
+Locals:
+  cooldown = MultiBarBottomRightButton9Cooldown
+  start    = <secret number>
+  duration = <secret number>
+  modRate  = <secret number>
+```
+
+**Read this before assuming it is ours.** Unlike #7, this error names **no
+addon**. Every frame in the stack is Blizzard's. What it means is that during an
+encounter the game hands its own UI secret cooldown values, `SetCooldown`
+accepts them **only in untainted execution**, and by the time Blizzard's action
+button called it the execution was tainted — by something. The stack cannot say
+what, and neither can we.
+
+**The authoritative tool is the taint log, not the error.**
+
+```
+/console taintLog 2
+/reload
+   ... reproduce ...
+```
+
+then read `World of Warcraft/_retail_/Logs/taint.log`, which names the addon and
+the variable. Nothing in this repo can substitute for that. `taintLog 2` is
+verbose and costs frames; turn it off afterwards with `/console taintLog 0`.
+
+*What was changed anyway, because both were wrong on their own terms:*
+
+- **UI work in combat.** The sync feature redrew the responses window on every
+  incoming response and roll — messages that arrive *during the pull*, inside
+  RCLootCouncil's comm dispatch. Twenty candidates answering meant twenty
+  redraws mid-encounter. That breaks this addon's own weight rule, and drawing
+  from tainted code while the game is handing its UI secret values is a risk
+  taken for a window nobody can read mid-pull. All UI updates now route through
+  `ns.WhenOutOfCombat`, keyed, so a hundred messages collapse into one redraw
+  when combat drops.
+- **The tooltip callback now returns immediately in combat.** It is the addon's
+  largest taint surface by design — it runs inside whoever asked for the
+  tooltip, and that includes Blizzard's action buttons. Nobody reads a
+  "Reserved by" line mid-pull and loot is not awarded during a boss, so the
+  exposure bought nothing.
+
+**Neither of these is confirmed to be the cause.** They are exposure reduction.
+If the error survives them, the taint log is the next step, and the honest
+possibility that it was never this addon has to stay open — the error named no
+addon, and a raid client runs many.
+
 ---
 
 ## Checked, and already correct

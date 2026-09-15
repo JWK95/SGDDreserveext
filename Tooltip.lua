@@ -53,6 +53,19 @@ local function OnItem(tooltip, data)
 	-- "Reserved by" line there would be describing the wrong item entirely.
 	if tooltip ~= GameTooltip and tooltip ~= ItemRefTooltip then return end
 
+	-- Nothing at all in combat, and this is the cheapest rejection of the lot
+	-- so it goes near the top.
+	--
+	-- This callback is the addon's largest taint surface BY DESIGN: it runs
+	-- inside whoever asked for the tooltip, which includes Blizzard's own action
+	-- buttons. During an encounter the game hands its UI secret values and only
+	-- permits them in UNTAINTED execution, so our code running on that path is a
+	-- risk we get nothing for -- nobody reads a "Reserved by" line mid-pull, and
+	-- loot is not awarded during a boss.
+	--
+	-- Reducing exposure, not a diagnosed fix. See docs/in-game-gotchas.md #8.
+	if InCombatLockdown() then return end
+
 	if not ns.Options().showTooltipReserves then return end
 
 	-- AnySet, not Data: an officer's own import if there is one, otherwise the
