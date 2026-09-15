@@ -50,11 +50,6 @@ files["spec/"] = {
 globals = {
 	-- Ours
 	"SGDDReservesDB",
-
-	-- Blizzard's popup registry. Written to, not just read: Sync.lua adds the
-	-- accept dialog to it. Declared as a global rather than a read_global for
-	-- exactly that reason.
-	"StaticPopupDialogs",
 }
 
 read_globals = {
@@ -112,6 +107,22 @@ read_globals = {
 	-- arriving over somebody's action bars mid-pull.
 	"StaticPopup_Show",
 	"InCombatLockdown",
+
+	-- Blizzard's popup registry, declared FIELD BY FIELD on purpose.
+	--
+	-- The table is read-only here and our one dialog key is not, which makes
+	-- luacheck enforce the exact rule a raid taught us: adding our key is fine,
+	-- ASSIGNING THE GLOBAL is a taint bug. `StaticPopupDialogs = StaticPopupDialogs or {}`
+	-- looks like harmless defensive code, taints the global permanently, and
+	-- surfaces as SGDDReserves being blamed for calling the protected
+	-- SpellStopCasting() when somebody presses Escape. See Sync.lua.
+	--
+	-- Listing it as a plain writable global would let that straight back in.
+	StaticPopupDialogs = {
+		fields = {
+			SGDDRESERVES_ACCEPT = { read_only = false },
+		},
+	},
 	"IsInGroup",
 	"YES",
 	"NO",

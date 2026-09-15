@@ -178,6 +178,75 @@ check where a real one would not be.
 Why no test saw it: the same reason as #1 and #3. There is no such thing as a
 secret value outside the game.
 
+### 7. Pressing Escape was blamed on us — assigning a Blizzard global is taint
+
+**Severity: high. Seen in game on the first build of the sync feature.**
+
+```
+[ADDON_ACTION_FORBIDDEN] AddOn 'SGDDReserves' tried to call the protected
+function 'SpellStopCasting()'.
+  [C]: in function 'SpellStopCasting'
+  [Blizzard_GameMenuEsc/Blizzard_GameMenuEsc.lua]:101
+  [C]: in function 'ToggleGameMenu'
+  [string "TOGGLEGAMEMENU"]:1
+```
+
+Nothing in that stack is ours, and nothing in it mentions popups, reserves or
+loot. The user pressed **Escape**. It fired **in a dungeon**, where the whole
+raider-facing half is switched off.
+
+*Cause:* one line in `Sync.lua`.
+
+```lua
+StaticPopupDialogs = StaticPopupDialogs or {}   -- taint
+```
+
+**Writing to a global from addon code taints that global, permanently.**
+Blizzard's Escape handler reads `StaticPopupDialogs`, so it inherited the taint,
+and the next protected function that path called — `SpellStopCasting()` — was
+refused and attributed to whichever addon tainted it. Us.
+
+Two things make this hard to reason about from the symptom:
+
+- **The blamed function has nothing to do with the tainted table.** Taint
+  travels along the execution path, so the error surfaces at the first
+  *protected* call after the tainted read, which can be arbitrarily far from
+  the cause. Exactly the same shape as #6, where secrecy propagated through
+  concatenation and surfaced at `AddLine`.
+- **Scope switches do not help.** The assignment was at **file scope**, so it
+  ran at `ADDON_LOADED` on every client in every zone, regardless of
+  `ns.InRaidScope()` or whether a dialog was ever shown. The dungeon in the
+  report is the clue that proves it: the feature was off and the bug still
+  fired.
+
+`X = X or {}` is the trap. It reads as harmless defensive code and it is an
+assignment.
+
+*Fix:* never assign the global. Write the **field** — which is what every addon
+does and is safe — and register it lazily on first prompt, so a client that is
+never offered a list never touches Blizzard's table at all.
+
+*What was proved.* `.luacheckrc` now declares `StaticPopupDialogs` field by
+field: the table read-only, our one key writable. Reintroducing the assignment
+produces
+
+```
+Sync.lua:273:1: setting read-only global variable 'StaticPopupDialogs'
+```
+
+and fails CI. Confirmed by reintroducing it and checking it compiles first, so
+the catch is a real one rather than a syntax error.
+
+*Not the culprit, checked:* `tinsert(UISpecialFrames, name)` modifies the
+table's **contents**, not the global binding, and `OfficerFrame.lua` has done it
+since v0.2.0 without producing this. If an Escape-path forbidden error ever
+appears again with no global assignment in the addon, that is the next thing to
+suspect.
+
+Why no test saw it: `luacheck` would have, had the global been declared
+correctly — it was listed as writable, which is what let the assignment through.
+A lint allowlist is only as good as the entry.
+
 ---
 
 ## Checked, and already correct

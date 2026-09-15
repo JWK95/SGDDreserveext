@@ -247,35 +247,73 @@ function Sync:AskML()
 	self:Request()
 end
 
--- The dialog. Named rather than anonymous so it can be reused by both entry
--- points, and so a second announce cannot stack a second copy on screen.
-StaticPopupDialogs = StaticPopupDialogs or {}
-StaticPopupDialogs["SGDDRESERVES_ACCEPT"] = {
-	text = "%s",
-	button1 = YES,
-	button2 = NO,
-	-- Guarded: these run from Blizzard's popup dispatch, and a throw here leaves
-	-- a dialog on screen that cannot be dismissed.
-	OnAccept = function()
-		ns.Guard("reserve sync (accept)", function() ns.Sync:Request() end)
-	end,
-	-- Declining is remembered exactly as acceptance is: the question was about
-	-- a LIST, and re-asking on the next boss because the answer was no is the
-	-- behaviour that gets an addon turned off.
-	OnCancel = function()
-		ns.Guard("reserve sync (decline)", function()
-			local at = ns.Sync.announcedAt
-			if at then ns.DB().lastAcceptedAt = at end
-		end)
-	end,
-	timeout = 0,
-	whileDead = true,
-	hideOnEscape = true,
-	preferredIndex = 3,
-}
+-- The dialog.
+--
+-- NEVER ASSIGN THE GLOBAL. `StaticPopupDialogs = StaticPopupDialogs or {}` looks
+-- like harmless defensive code and is a taint bug that took a raid to find:
+-- writing to a global from addon code taints that global permanently, Blizzard's
+-- Escape handler reads this table, and the next protected function that path
+-- calls is refused and blamed on us. The symptom is nothing to do with popups --
+--
+--   ADDON_ACTION_FORBIDDEN: AddOn 'SGDDReserves' tried to call the
+--   protected function 'SpellStopCasting()'
+--     ... Blizzard_GameMenuEsc.lua:101 ... ToggleGameMenu
+--
+-- i.e. somebody pressed Escape. It fired in a DUNGEON, where the sync is
+-- switched off entirely, because the assignment was at file scope and ran at
+-- load on every client everywhere.
+--
+-- Writing a FIELD of the table is fine and is what every addon does. Only the
+-- assignment to the global itself is poison. `.luacheckrc` now encodes exactly
+-- that: the table is read-only, our one key is not.
+--
+-- Registered lazily, on first prompt, rather than at load. A client that is
+-- never offered a list never touches Blizzard's table at all -- the same
+-- "nothing until it is asked for" rule the frames already follow.
+local dialogRegistered = false
+
+local function EnsureDialog()
+	if dialogRegistered then return true end
+	if type(StaticPopupDialogs) ~= "table" then return false end
+
+	StaticPopupDialogs["SGDDRESERVES_ACCEPT"] = {
+		text = "%s",
+		button1 = YES,
+		button2 = NO,
+		-- Guarded: these run from Blizzard's popup dispatch, and a throw here
+		-- leaves a dialog on screen that cannot be dismissed.
+		OnAccept = function()
+			ns.Guard("reserve sync (accept)", function() ns.Sync:Request() end)
+		end,
+		-- Declining is remembered exactly as acceptance is: the question was
+		-- about a LIST, and re-asking on the next boss because the answer was
+		-- no is the behaviour that gets an addon turned off.
+		OnCancel = function()
+			ns.Guard("reserve sync (decline)", function()
+				local at = ns.Sync.announcedAt
+				if at then ns.DB().lastAcceptedAt = at end
+			end)
+		end,
+		timeout = 0,
+		whileDead = true,
+		hideOnEscape = true,
+		preferredIndex = 3,
+	}
+
+	dialogRegistered = true
+	return true
+end
 
 function Sync:Prompt(exportedAt, reserveCount)
 	if not Protocol.ShouldPrompt(exportedAt, ns.LastAcceptedAt()) then return end
+
+	-- If Blizzard's popup table is not there, say it in chat rather than
+	-- silently never offering. Same rule as everywhere else: the raider has to
+	-- be able to tell "not offered" from "nothing to offer".
+	if not EnsureDialog() then
+		ns.Print("the master looter has a reserve list. Use /rc askml to import it.")
+		return
+	end
 
 	self.announcedAt = exportedAt
 
