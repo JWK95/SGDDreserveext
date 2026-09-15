@@ -77,13 +77,22 @@ local function Table()
 				desc = "Add a 'Reserved by:' line to the tooltip of any item somebody has reserved -- in your bags, "
 					.. "the loot window, and on item links in chat.",
 				get = function() return ns.Options().showTooltipReserves end,
-				set = function(_, v) ns.Options().showTooltipReserves = v end,
+				-- UpdateScope so turning it ON mid-session registers the
+				-- callback immediately instead of at the next login.
+				set = function(_, v)
+					ns.Options().showTooltipReserves = v
+					ns.UpdateScope()
+				end,
 			},
 			tooltipNote = {
 				order = 8,
 				type = "description",
-				name = "Turning this off stops the line appearing immediately. The line only ever shows on "
-					.. "your own screen, and only for items on the list you imported.",
+				name = "Turning this off stops the line appearing immediately, and after a |cffffffff/reload|r "
+					.. "the addon stops running inside item tooltips altogether. "
+					.. "|cffff8800If you ever cannot use items from your bags or your action bars misbehave in a raid, "
+					.. "turn this off and /reload -- it is the one place this addon runs inside other frames' code.|r "
+					.. "The line only ever shows on your own screen, never in combat, and only for items on the "
+					.. "list you have.",
 			},
 			gap3 = { order = 9, type = "header", name = "Loot windows" },
 			autoReserves = {

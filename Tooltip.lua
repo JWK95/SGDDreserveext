@@ -150,8 +150,30 @@ end
 -- option is checked inside the callback; it cannot stop the callback.
 --
 -- What has not changed: a raider who never accepts a list registers nothing.
+--
+-- THE OPTION IS NOW CHECKED HERE TOO, and that is a correction rather than a
+-- belt-and-braces addition.
+--
+-- Before, the callback was registered whenever this client had data, whatever
+-- the setting said, and the setting was only consulted inside the callback. So
+-- somebody who turned the feature off still had this addon executing inside
+-- every item tooltip in the game -- including bag buttons and action buttons --
+-- for the rest of the session, with no way to stop it and nothing gained. The
+-- off switch stopped the LINE and left the exposure.
+--
+-- That matters because this callback is where the addon runs inside somebody
+-- else's execution. Off at login now means never registered, which is the only
+-- honest meaning of off for a callback that cannot be removed. It also makes
+-- "turn it off and reload" a real remedy somebody can apply on a raid night,
+-- rather than a half-measure -- see docs/in-game-gotchas.md #8 and #9.
+--
+-- Turning it ON mid-session still works: Options.lua calls ns.UpdateScope()
+-- when the setting changes, which lands here. Turning it OFF mid-session still
+-- stops the line via the check inside the callback, because unregistering
+-- remains unavailable.
 function Tooltip:SetActive()
 	if self.registered then return end
+	if not ns.Options().showTooltipReserves then return end
 	if not (ns.IsOfficerClient() or ns.ReceivedSet()) then return end
 
 	local processor = TooltipDataProcessor

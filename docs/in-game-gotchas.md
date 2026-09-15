@@ -304,6 +304,51 @@ If the error survives them, the taint log is the next step, and the honest
 possibility that it was never this addon has to stay open — the error named no
 addon, and a raid client runs many.
 
+### 9. Could not use items from bags in a raid — UNRESOLVED, same family as #8
+
+**Severity: high — this one stops somebody playing. Cause not established.**
+
+Reported alongside #8, from the same raid: items in bags could not be used.
+
+That is the classic shape of `ADDON_ACTION_BLOCKED` — a protected action
+refused because the execution path reached it tainted. And unlike #8, there is a
+**direct and documented route from this addon to bag buttons**:
+
+- `Tooltip.OnItem` runs on every item tooltip the client builds.
+- `GameTooltip` is what bags render into. The callback's own comment says so:
+  *"GameTooltip covers bags, the loot window, the merchant and the character
+  sheet."*
+- The callback ends by calling `tooltip:AddLine(...)` — our tainted code
+  **writing into GameTooltip**, inside the container button's execution.
+
+So hovering a bag item runs this addon inside Blizzard's bag code. That is not a
+proof of cause, but it is a far shorter path than anything in #8, and it is the
+only place this addon executes inside another frame's code.
+
+*The 60-second test, in order:*
+
+1. **Turn off "Show reserves in item tooltips" and `/reload`.** After the fix
+   below, that means the callback is never registered and this addon is not in
+   any tooltip path at all. If bags work, it was this.
+2. **Disable SGDDReserves entirely and `/reload`.** If bags still fail, it was
+   never us.
+3. **`/console taintLog 2`**, reload, reproduce, read `Logs/taint.log` — the
+   only thing that names the culprit outright.
+
+*What was fixed, and it was a real mistake:* the callback used to be registered
+whenever the client had data, **regardless of the setting**. The option was only
+consulted inside the callback. So turning the feature off stopped the *line* and
+left this addon executing inside every item tooltip in the game for the rest of
+the session, with no way to stop it and nothing gained. Off at login now means
+**never registered**, which is the only honest meaning of "off" for a callback
+that cannot be removed — and it is what makes step 1 above a real remedy rather
+than a half-measure.
+
+*Standing cost, unchanged:* `TooltipDataProcessor.AddTooltipPostCall` still has
+no removal, so turning the setting off **mid-session** cannot unregister a
+callback already added. It stops the line; the `/reload` is what removes the
+exposure.
+
 ---
 
 ## Checked, and already correct
