@@ -53,17 +53,18 @@ local function OnItem(tooltip, data)
 	-- "Reserved by" line there would be describing the wrong item entirely.
 	if tooltip ~= GameTooltip and tooltip ~= ItemRefTooltip then return end
 
-	-- Nothing at all in combat, and this is the cheapest rejection of the lot
-	-- so it goes near the top.
+	-- No work in combat, which is the addon's standing rule, and it keeps
+	-- AddLine off a tooltip nobody can read mid-pull.
 	--
-	-- This callback is the addon's largest taint surface BY DESIGN: it runs
-	-- inside whoever asked for the tooltip, which includes Blizzard's own action
-	-- buttons. During an encounter the game hands its UI secret values and only
-	-- permits them in UNTAINTED execution, so our code running on that path is a
-	-- risk we get nothing for -- nobody reads a "Reserved by" line mid-pull, and
-	-- loot is not awarded during a boss.
+	-- BUT DO NOT MISTAKE THIS FOR A TAINT FIX. An earlier version of this
+	-- comment claimed it reduced taint exposure. It does not: taint attaches
+	-- when our code RUNS on a path, and returning early does not undo having
+	-- been called. Once this callback is registered, every item tooltip in the
+	-- game runs it.
 	--
-	-- Reducing exposure, not a diagnosed fix. See docs/in-game-gotchas.md #8.
+	-- That is why the real lever is registration, not this branch, and why the
+	-- setting now defaults off. See Tooltip:SetActive and
+	-- docs/in-game-gotchas.md #9.
 	if InCombatLockdown() then return end
 
 	if not ns.Options().showTooltipReserves then return end

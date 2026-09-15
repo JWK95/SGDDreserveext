@@ -137,8 +137,41 @@ local function InitDB()
 	if SGDDReservesDB.options.respondToWhispers == nil then
 		SGDDReservesDB.options.respondToWhispers = true
 	end
+	-- DEFAULTS OFF, and this changed after a raid.
+	--
+	-- The item tooltip is the only part of this addon that executes inside
+	-- another frame's code. Everything else draws in our own windows or through
+	-- RCLootCouncil's column API. A guild member could not use items from their
+	-- bags during a raid, and disabling this addon fixed it -- confirmed in
+	-- game, not inferred.
+	--
+	-- The reason it has to be the DEFAULT rather than a switch people find after
+	-- it bites them: TooltipDataProcessor.AddTooltipPostCall cannot be
+	-- unregistered, and simply RUNNING on a path taints it -- an early return
+	-- inside the callback does not undo having been called. So the only state
+	-- that costs nothing is "never registered", and that has to be where
+	-- somebody starts rather than where they end up.
+	--
+	-- The feature still works and is one checkbox away. See
+	-- docs/in-game-gotchas.md #9.
 	if SGDDReservesDB.options.showTooltipReserves == nil then
-		SGDDReservesDB.options.showTooltipReserves = true
+		SGDDReservesDB.options.showTooltipReserves = false
+	end
+
+	-- One-time, for anybody who already had it on.
+	--
+	-- A changed default does nothing for an existing install: their saved
+	-- variables already say true, so they would upgrade straight back into the
+	-- bug. This forces it off once, says so, and never touches the setting
+	-- again -- somebody who turns it back on stays turned on.
+	if not SGDDReservesDB.tooltipSafetyReset then
+		SGDDReservesDB.tooltipSafetyReset = true
+		if SGDDReservesDB.options.showTooltipReserves then
+			SGDDReservesDB.options.showTooltipReserves = false
+			ns.Warn("the 'Reserved by' tooltip line has been turned OFF. It could stop you using items "
+				.. "from your bags in a raid. Everything else is unchanged -- the reserve column, the loot "
+				.. "windows and !wdir replies all still work. Turn it back on in the settings if you want it.")
+		end
 	end
 	-- Both windows open themselves when a loot session starts. The off switch
 	-- exists for the same reason the tooltip's does: somebody who finds two

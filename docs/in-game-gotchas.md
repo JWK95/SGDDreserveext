@@ -304,9 +304,10 @@ If the error survives them, the taint log is the next step, and the honest
 possibility that it was never this addon has to stay open — the error named no
 addon, and a raid client runs many.
 
-### 9. Could not use items from bags in a raid — UNRESOLVED, same family as #8
+### 9. Could not use items from bags in a raid — CONFIRMED OURS
 
-**Severity: high — this one stops somebody playing. Cause not established.**
+**Severity: high — this one stops somebody playing. Confirmed in game:
+disabling SGDDReserves restored bag use.**
 
 Reported alongside #8, from the same raid: items in bags could not be used.
 
@@ -348,6 +349,36 @@ than a half-measure.
 no removal, so turning the setting off **mid-session** cannot unregister a
 callback already added. It stops the line; the `/reload` is what removes the
 exposure.
+
+#### The setting now defaults OFF
+
+Disabling the addon restored bag use, so this is ours. Which part is not yet
+proved, but the tooltip is the only code in this addon that executes inside
+another frame's code, and one fact decides the response:
+
+> **Running taints. Returning early does not untaint.**
+
+Taint attaches when our code *runs* on a path. An early return inside the
+callback — including the `InCombatLockdown` check added for #8 — does not undo
+having been called. An earlier version of that comment claimed it reduced taint
+exposure; it does not, and it has been corrected. Once the callback is
+registered, **every item tooltip in the game runs this addon**.
+
+So the only state that costs nothing is *never registered*, and that has to be
+where somebody starts rather than where they arrive after it bites them.
+`showTooltipReserves` now defaults to **false**, and a one-time migration turns
+it off for anybody who already had it on — a changed default does nothing for an
+existing install, whose saved variables already say true. The migration says so
+in chat, runs once, and never touches the setting again.
+
+Everything else is unaffected: the reserve column, both loot windows and the
+`!wdir` replies do not go near another addon's frames.
+
+**Open question, needs `taint.log`:** thousands of addons add tooltip lines
+without breaking bags, so this is probably not inherent to `AddTooltipPostCall`
+— something specific about what we do is likely at fault, and it may well be
+fixable. Until somebody captures a taint log during a reproduction, defaulting
+off is a mitigation, not an explanation. Do not close this.
 
 ---
 

@@ -73,9 +73,12 @@ local function Table()
 				order = 7,
 				type = "toggle",
 				width = "full",
-				name = "Show reserves in item tooltips",
+				name = "Show reserves in item tooltips |cffff8800(off by default)|r",
 				desc = "Add a 'Reserved by:' line to the tooltip of any item somebody has reserved -- in your bags, "
-					.. "the loot window, and on item links in chat.",
+					.. "the loot window, and on item links in chat.\n\n"
+					.. "OFF BY DEFAULT because this is the only part of the addon that runs inside other frames' "
+					.. "code, and it has stopped a raider using items from their bags mid-raid. "
+					.. "Turn it on if you want it; turn it off and /reload if anything odd starts happening.",
 				get = function() return ns.Options().showTooltipReserves end,
 				-- UpdateScope so turning it ON mid-session registers the
 				-- callback immediately instead of at the next login.
